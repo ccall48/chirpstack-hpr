@@ -1,0 +1,34 @@
+version: '3'
+services:
+  chirpstack-hpr:
+    build: .
+    image: chirpstack-hpr
+    container_name: chirpstack-hpr
+    restart: unless-stopped
+    volumes:
+      - './app:/app'
+      - '/path/to/your/delegate_keyfile.bin:/app/delegate_key.bin:ro'
+
+    environment:
+      - HELIUM_CONFIG_HOST=${HELIUM_CONFIG_HOST}
+      - HELIUM_KEYPAIR_BIN=${HELIUM_KEYPAIR_BIN}
+      - HELIUM_NET_ID=${HELIUM_NET_ID}
+      - HELIUM_OUI=${HELIUM_OUI}
+      - HELIUM_MAX_COPIES=${HELIUM_MAX_COPIES}
+      - SERVER_HOST=${SERVER_HOST}
+      - SERVER_IP=${SERVER_IP}
+      - DEVADDR_START=${DEVADDR_START}
+      - DEVADDR_END=${DEVADDR_END}
+      - DEV_ADDR_PREFIX_1=${DEV_ADDR_PREFIX_1}
+      - NETID_START=${NETID_START}
+      - NETID_END=${NETID_END}
+      - NETID_MASK=${NETID_MASK}
+      - ROUTE_ID=${ROUTE_ID}
+      - CHIRPSTACK_SERVER=${}
+      - CS_APIKEY=${CS_APIKEY}
+      - REDIS_HOST=${REDIS_HOST}
+
+networks:
+  default:
+    name: core-infra
+    external: true
