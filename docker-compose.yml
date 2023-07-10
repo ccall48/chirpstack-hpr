@@ -2,13 +2,13 @@ version: '3'
 services:
   chirpstack-hpr:
     build: .
-    image: chirpstack-hpr
+    image: chirpstack-hpr:latest
     container_name: chirpstack-hpr
     restart: unless-stopped
     volumes:
       - './app:/app'
-      - '/path/to/your/delegate_keyfile.bin:/app/delegate_key.bin:ro'
-
+      - ${HELIUM_CLI_PATH}:/usr/bin/hpr
+      - ${HELIUM_KEYPAIR_PATH}:/app/delegate_key.bin:ro
     environment:
       - HELIUM_CONFIG_HOST=${HELIUM_CONFIG_HOST}
       - HELIUM_KEYPAIR_BIN=${HELIUM_KEYPAIR_BIN}
@@ -24,9 +24,10 @@ services:
       - NETID_END=${NETID_END}
       - NETID_MASK=${NETID_MASK}
       - ROUTE_ID=${ROUTE_ID}
-      - CHIRPSTACK_SERVER=${}
+      - CHIRPSTACK_SERVER=${CHIRPSTACK_SERVER}
       - CS_APIKEY=${CS_APIKEY}
       - REDIS_HOST=${REDIS_HOST}
+    command: bash -c 'cd /app && python device_stream.py'
 
 networks:
   default:
