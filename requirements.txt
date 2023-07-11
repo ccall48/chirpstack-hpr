@@ -1,3 +1,4 @@
+aiosqlite
 ujson==5.8.0
 redis==4.6.0
 grpcio==1.56.0

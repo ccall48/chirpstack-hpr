@@ -1,14 +1,37 @@
 import os
 import subprocess
 import asyncio
+from functools import wraps
+from datetime import datetime as dt
+import logging
 import ujson
 import grpc
 import redis.asyncio as redis
 from google.protobuf.json_format import MessageToJson
 from chirpstack_api import api
 
+# -----------------------------------------------------------------------------
+# Create and configure logger
+# -----------------------------------------------------------------------------
+def my_logger(orig_func):
+    logging.basicConfig(
+        filename=f'hpr_{dt.now().strftime("%Y-%m-%d")}.log',
+        filemode='a',
+        format='%(asctime)s %(levelname)s:%(name)s:%(message)s',
+        level=logging.INFO,
+        datefmt='%H:%M:%S',
+    )
+    logging.getLogger("asyncio").setLevel(logging.INFO)
 
+    @wraps(orig_func)
+    def wrapper(*args, **kwargs):
+        logging.info(f'Passed args: {args}, kwargs: {kwargs}')
+        return orig_func(*args, **kwargs)
+    return wrapper
+
+# -----------------------------------------------------------------------------
 # ENVIRONMENT VARIABLES
+# -----------------------------------------------------------------------------
 helium_config_host = os.getenv('HELIUM_CONFIG_HOST')
 helium_keypair_bin = os.getenv('HELIUM_KEYPAIR_BIN')
 helium_net_id = os.getenv('HELIUM_NET_ID')
@@ -23,24 +46,31 @@ netid_end = os.getenv('NETID_END')
 net_mask = os.getenv('NETID_MASK')
 route_id = os.getenv('ROUTE_ID')
 
+# -----------------------------------------------------------------------------
 # CHIRPSTACK GRPC CONNECTION
+# -----------------------------------------------------------------------------
 cs_server = os.getenv('CHIRPSTACK_SERVER')
 cs_api_key = os.getenv('CS_APIKEY')
 auth_token = [('authorization', f'Bearer {cs_api_key}')]
 
+# -----------------------------------------------------------------------------
 # REDIS CHIRPSTACK CONNECTION
+# -----------------------------------------------------------------------------
 redis_server = os.getenv('REDIS_HOST')
 pool = redis.ConnectionPool(host=redis_server, port=6379, db=0)
 rdb = redis.Redis(connection_pool=pool, decode_responses=True)
 
-
+# -----------------------------------------------------------------------------
 # helper functions...
+# -----------------------------------------------------------------------------
+@my_logger
 def helium_packet_router(cmd: str):
     p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
     out, err = p.communicate()
     return out
 
 
+@my_logger
 async def stream_requests():
     stream_key = "api:stream:request"
     last_id = '0'
@@ -52,15 +82,11 @@ async def stream_requests():
 
                 if b'request' in message[1]:
                     msg = message[1][b'request']
-                    # print(b)
                     pl = api.request_log_pb2.RequestLog()
                     pl.ParseFromString(msg)
-                    # print(MessageToujson(pl))
                     req = ujson.loads(MessageToJson(pl))
                     if 'method' not in req.keys():
                         continue
-                    #if 'device_profile_id' in req.keys():
-                    #    continue
 
                     match req['method']:
                         case 'Create':
@@ -76,12 +102,12 @@ async def stream_requests():
                             print(MessageToJson(pl))
                             await update_device_euis(req['metadata'])
 
-
         except Exception as exc:
-            print(f'Error: {exc}')
+            logging.exception(f'Error: {exc}')
             pass
 
 
+@my_logger
 async def add_device_euis(data: dict):
     """
     add device:
@@ -98,6 +124,7 @@ async def add_device_euis(data: dict):
     return print(res)
 
 
+@my_logger
 async def remove_device_euis(data: dict):
     """
     todo:
@@ -112,10 +139,11 @@ async def remove_device_euis(data: dict):
     return True
 
 
+@my_logger
 async def update_device_euis(data: dict):
     """
     completes an action set on device to helium packet router.
-      - disabling a device will remove it from route id.
+      - disabling a device will remove it from a route id.
       - enabling a device will add it back to the route id.
       - toggling on/off should allow for a previously unconnected device to be added to hpr.
     """
@@ -135,6 +163,7 @@ async def update_device_euis(data: dict):
     return print(res)
 
 
+@my_logger
 async def route_handler(dev_eui: str):
     async with grpc.aio.insecure_channel(cs_server) as channel:
         client = api.DeviceServiceStub(channel)
