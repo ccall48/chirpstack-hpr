@@ -15,11 +15,12 @@ from chirpstack_api import api
 # -----------------------------------------------------------------------------
 def my_logger(orig_func):
     logging.basicConfig(
-        filename=f'hpr_{dt.now().strftime("%Y-%m-%d")}.log',
+        #filename=f'hpr_{dt.now().strftime("%Y-%m-%d")}.log',
+        filename=f'chirpstack-hpr.log',
         filemode='a',
         format='%(asctime)s %(levelname)s:%(name)s:%(message)s',
         level=logging.INFO,
-        datefmt='%H:%M:%S',
+        datefmt='%Y-%m-%d %H:%M:%S',
     )
     logging.getLogger("asyncio").setLevel(logging.INFO)
 
@@ -54,7 +55,7 @@ cs_api_key = os.getenv('CS_APIKEY')
 auth_token = [('authorization', f'Bearer {cs_api_key}')]
 
 # -----------------------------------------------------------------------------
-# REDIS CHIRPSTACK CONNECTION
+# CHIRPSTACK REDIS CONNECTION
 # -----------------------------------------------------------------------------
 redis_server = os.getenv('REDIS_HOST')
 pool = redis.ConnectionPool(host=redis_server, port=6379, db=0)
@@ -111,7 +112,7 @@ async def stream_requests():
 async def add_device_euis(data: dict):
     """
     add device:
-      adds a device to hpr when added as a device within the chirpstack api or webui.
+      - adds a device to hpr when added as a device within the chirpstack api or webui.
     """
     if 'dev_eui' not in data.keys():
         return

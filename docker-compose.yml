@@ -29,6 +29,9 @@ services:
       - CS_APIKEY=${CS_APIKEY}
       - REDIS_HOST=${REDIS_HOST}
     command: bash -c 'cd /app && python device_stream.py'
+    #command: bash -c 'cd /app && python chirpstack_hpr.py'
+    #depends_on:
+    #  - redis
 
 networks:
   default:
