@@ -1,7 +1,10 @@
+aiomqtt==1.1.0
 asyncio-mqtt==0.16.2
 asyncpg==0.28.0
+base58==2.1.1
 cachetools==5.3.1
 certifi==2023.5.7
+cffi==1.15.1
 charset-normalizer==3.2.0
 chirpstack-api==4.4.0
 google-api-core==2.11.1
@@ -15,6 +18,8 @@ protobuf==4.23.4
 psycopg2-binary==2.9.6
 pyasn1==0.5.0
 pyasn1-modules==0.3.0
+pycparser==2.21
+PyNaCl==1.5.0
 redis==4.6.0
 requests==2.31.0
 rsa==4.9

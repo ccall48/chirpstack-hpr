@@ -7,8 +7,10 @@ services:
     restart: unless-stopped
     volumes:
       - './app:/app'
-      - '/home/cory/helium-config-service-cli/target/release/helium-config-service-cli:/usr/bin/hpr'
-      - '/home/cory/helium/delegate_key.bin:/app/delegate_key.bin:ro'
+    #  - '/home/cory/helium-config-service-cli/target/release/helium-config-service-cli:/usr/bin/hpr'
+      - '${HELIUM_CLI_PATH}:/usr/bin/hpr'
+    #  - '/home/cory/helium/delegate_key.bin:/app/delegate_key.bin:ro'
+      - '${HELIUM_KEYPAIR_PATH}:/app/delegate_key.bin:ro'
     environment:
       - HELIUM_CONFIG_HOST=${HELIUM_CONFIG_HOST}
       - HELIUM_KEYPAIR_BIN=/app/delegate_key.bin
@@ -27,11 +29,12 @@ services:
       - ROUTE_ID=${ROUTE_ID}
       - CHIRPSTACK_SERVER=${CHIRPSTACK_SERVER}
       - CS_APIKEY=${CS_APIKEY}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASS=${POSTGRES_PASS}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_DB=${POSTGRES_DB}
       - REDIS_HOST=${REDIS_HOST}
-    command: bash -c 'cd /app && python device_stream.py'
-    #command: bash -c 'cd /app && python chirpstack_hpr.py'
-    #depends_on:
-    #  - redis
+    command: bash -c 'cd /app && python ChirpHeliumRequests.py'
 
 networks:
   default:
