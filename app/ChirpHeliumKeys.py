@@ -98,31 +98,3 @@ class ChirpDeviceKeys:
         )
         self.db_transaction(query)
         return f'Updated dev_eui: {dev_eui}'
-
-
-#if __name__ == '__main__':
-#    client = ChirpDeviceKeys(
-#        route_id=os.getenv('ROUTE_ID'),
-#        postgres_host=os.getenv('POSTGRES_HOST'),
-#        postgres_user=os.getenv('POSTGRES_USER'),
-#        postgres_pass=os.getenv('POSTGRES_PASS'),
-#        postgres_name=os.getenv('POSTGRES_DB'),
-#        chirpstack_host=os.getenv('CHIRPSTACK_SERVER'),
-#        chirpstack_token=os.getenv('CS_APIKEY')
-#    )
-#
-#    print('\n'.join(list(map(client.get_merged_keys, client.fetch_all_devices()))))
-
-    """
-    # mydict = {}
-    # mydict.update(client.get_device('2cf7f1c0524001cf'))
-    # mydict.update(client.get_device_activation('2cf7f1c0524001cf'))
-    # print(client.get_device_activation('2cf7f1c0524001cf'))
-    # print(client.get_merged_keys('2cf7f1c0524001cf'))
-
-    # for k,v in mydict.items():
-    #     print(k, v)
-    # print(mydict)
-    # print(list(map(client.get_device, client.fetch_all_devices())))
-    # client.get_device()
-    """
