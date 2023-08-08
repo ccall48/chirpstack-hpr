@@ -3,7 +3,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from ChirpHeliumRequests import ChirpstackStreams
 from ChirpHeliumKeys import ChirpDeviceKeys
-# from ChirpHeliumTenant import ChirpstackTenant
+from ChirpHeliumTenant import ChirpstackTenant
 
 
 if __name__ == '__main__':
@@ -35,6 +35,16 @@ if __name__ == '__main__':
         chirpstack_token=chirpstack_token
     )
 
+    tenant = ChirpstackTenant(
+        route_id=route_id,
+        postgres_host=postgres_host,
+        postgres_user=postgres_user,
+        postgres_pass=postgres_pass,
+        postgres_name=postgres_name,
+        chirpstack_host=chirpstack_host,
+        chirpstack_token=chirpstack_token
+    )
+
     def run_every(fn: str, interval: int):
         name = fn
         while True:
@@ -52,8 +62,10 @@ if __name__ == '__main__':
     interval = 60 * 30  # 30 minutes
     client_streams.create_tables()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         executor.submit(client_streams.api_stream_requests)
-        #executor.submit(client_streams.device_stream_event)
-        #executor.submit(client_streams.stream_meta)
-        executor.submit(run_every, update_device_keys, interval)
+        # executor.submit(tenant.stream_meta)
+        executor.submit(tenant.device_stream_event)
+        # executor.submit(client_streams.stream_meta)
+        executor.submit(run_every, client_streams.update_tenant_table, 60)
+        executor.submit(run_every, update_device_keys, 300)

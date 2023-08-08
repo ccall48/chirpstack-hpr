@@ -8,7 +8,7 @@ import psycopg2.extras
 import time
 import redis
 import grpc
-from google.protobuf.json_format import MessageToJson
+from google.protobuf.json_format import MessageToJson, MessageToDict
 import ujson
 from chirpstack_api import api, meta, integration
 
@@ -69,7 +69,7 @@ class ChirpstackStreams:
             req = api.GetDeviceRequest()
             req.dev_eui = dev_eui
             resp = client.Get(req, metadata=self.auth_token)
-            data = ujson.loads(MessageToJson(resp))['device']
+            data = MessageToDict(resp)['device']  # ujson.loads(MessageToJson(resp))['device']
         return data['devEui'], data['joinEui']
 
     def get_device_request_data(self, dev_eui: str):
@@ -78,7 +78,7 @@ class ChirpstackStreams:
             req = api.GetDeviceRequest()
             req.dev_eui = dev_eui
             resp = client.Get(req, metadata=self.auth_token)
-            data = ujson.loads(MessageToJson(resp))['device']
+            data = MessageToDict(resp)['device']  # ujson.loads(MessageToJson(resp))['device']
         return data
 
     def get_device_activation(self, dev_eui: str):
@@ -87,31 +87,11 @@ class ChirpstackStreams:
             req = api.GetDeviceActivationRequest()
             req.dev_eui = dev_eui
             resp = client.GetActivation(req, metadata=self.auth_token)
-            data = ujson.loads(MessageToJson(resp))['deviceActivation']
+            data = MessageToDict(resp)['deviceActivation']  # ujson.loads(MessageToJson(resp))['deviceActivation']
         return data
 
     def create_tables(self):
         query = """
-            --CREATE TABLE IF NOT EXISTS helium_devices AS
-            --SELECT
-            --    application.tenant_id AS tenant_id,
-            --    device.dev_addr AS dev_addr,
-            --    device.dev_eui AS dev_eui,
-            --    device.join_eui AS join_eui,
-            --    device_keys.nwk_key AS nwk_key,
-            --    (variables->>'max_copies')::int as max_copies,
-            --    device.name AS device_name,
-            --    device.is_disabled AS is_disabled
-            --FROM device
-            --JOIN device_keys
-            --    ON device.dev_eui = device_keys.dev_eui
-            --JOIN application
-            --    ON device.application_id = application.id;
-            --ALTER TABLE helium_devices ADD COLUMN IF NOT EXISTS nws_key text;
-            --ALTER TABLE helium_devices ADD COLUMN IF NOT EXISTS fcnt_up int;
-            --ALTER TABLE helium_devices ADD COLUMN IF NOT EXISTS fcnt_down int;
-            --ALTER TABLE helium_devices ADD COLUMN IF NOT EXISTS is_added bool default false;
-
             CREATE TABLE IF NOT EXISTS helium_devices (
                 id serial primary key,
                 dev_eui text unique,    -- devices['devEui']
@@ -125,16 +105,14 @@ class ChirpstackStreams:
                 fcnt_down int,          -- devices['nFCntDown']
                 is_disabled bool default false
             );
-
-            CREATE TABLE IF NOT EXISTS helium_skfs (
-                id serial primary key,
-                dev_eui text unique,
-                join_eui text,
-                dev_addr text,
-                nws_key text,
-                max_copies int
-            );
-
+            -- CREATE TABLE IF NOT EXISTS helium_skfs (
+            --     id serial primary key,
+            --     dev_eui text unique,
+            --     join_eui text,
+            --     dev_addr text,
+            --     nws_key text,
+            --     max_copies int
+            -- );
             CREATE TABLE IF NOT EXISTS helium_tenant (
                 tenant_id uuid primary key,
                 tenant_name text,
@@ -145,60 +123,43 @@ class ChirpstackStreams:
         print('Run create tables...')
         self.db_transaction(query)
 
-    def update_tables(self):
+    def update_tenant_table(self):
         query = """
-            --UPDATE helium_devices
-            --SET
-            --    dev_addr=device.dev_addr,
-            --    dev_eui=device.dev_eui,
-            --    join_eui=device.join_eui,
-            --    max_copies=(variables->>'max_copies')::int,
-            --    device_name=device.name,
-            --    is_disabled=device.is_disabled
-            --FROM device
-            --WHERE helium_devices.dev_eui=device.dev_eui;
-
-            --UPDATE helium_devices
-            --SET
-            --    nwk_key=device_keys.nwk_key
-            --FROM device_keys
-            --WHERE helium_devices.dev_eui=device_keys.dev_eui;
-
             INSERT INTO helium_tenant (tenant_id, tenant_name)
             SELECT tenant.id, tenant.name
             FROM tenant
             ON CONFLICT (tenant_id) DO NOTHING;
         """
-        print(f'Run background tables update... {time.ctime()}')
+        print(f'Update tenants table... {time.ctime()}')
         self.db_transaction(query)
 
     def fetch_active_devices(self) -> list[str]:
         query = "SELECT dev_eui FROM device WHERE is_disabled=false;"
-        result = [d['dev_eui'].hex() for d in self.db_fetch(query)]
+        result = [device['dev_eui'].hex() for device in self.db_fetch(query)]
         return result
 
-    def update_helium_skfs(self):
-        #devs = self.get_device_request_data()
-        # need another query to update max_copies & join_eui...?
-        active_devices = self.fetch_active_devices()
-        devices = list(map(self.get_device_activation, active_devices))
-        for device in devices:
-            dev_eui = device['devEui']
-            # join_eui = device['join_eui']
-            dev_addr = device['devAddr']
-            nws_key = device['nwkSEncKey']
-            query = """
-                INSERT INTO helium_skfs (dev_eui, dev_addr, nws_key)
-                VALUES ('{0}', '{1}', '{2}')
-                ON CONFLICT (dev_eui) DO
-                UPDATE SET
-                    dev_eui='{0}',
-                    dev_addr='{1}',
-                    nws_key='{2}'
-                WHERE helium_skfs.dev_eui='{0}';
-            """.format(dev_eui, dev_addr, nws_key)
-            self.db_transaction(query)
-            print(query)
+    #def update_helium_skfs(self):
+    #    #devs = self.get_device_request_data()
+    #    # need another query to update max_copies & join_eui...?
+    #    active_devices = self.fetch_active_devices()
+    #    devices = list(map(self.get_device_activation, active_devices))
+    #    for device in devices:
+    #        dev_eui = device['devEui']
+    #        # join_eui = device['join_eui']
+    #        dev_addr = device['devAddr']
+    #        nws_key = device['nwkSEncKey']
+    #        query = """
+    #            INSERT INTO helium_skfs (dev_eui, dev_addr, nws_key)
+    #            VALUES ('{0}', '{1}', '{2}')
+    #            ON CONFLICT (dev_eui) DO
+    #            UPDATE SET
+    #                dev_eui='{0}',
+    #                dev_addr='{1}',
+    #                nws_key='{2}'
+    #            WHERE helium_skfs.dev_eui='{0}';
+    #        """.format(dev_eui, dev_addr, nws_key)
+    #        self.db_transaction(query)
+    #        print(query)
 
     def api_stream_requests(self):
         stream_key = "api:stream:request"
@@ -213,7 +174,7 @@ class ChirpstackStreams:
                         msg = message[1][b'request']
                         pl = api.request_log_pb2.RequestLog()
                         pl.ParseFromString(msg)
-                        req = ujson.loads(MessageToJson(pl))
+                        req = MessageToDict(pl) #  ujson.loads(MessageToJson(pl))
                         if 'method' not in req.keys():
                             continue
 
@@ -250,9 +211,11 @@ class ChirpstackStreams:
         print(f'Add Device EUIs: {dev_eui}, {join_eui}')
 
         query = """
-            INSERT INTO helium_skfs (dev_eui, join_eui)
-            VALUES ('{}', '{}')
-            ON CONFLICT (dev_eui) DO NOTHING;
+            -- INSERT INTO helium_skfs (dev_eui, join_eui)
+            INSERT INTO helium_devices (dev_eui, join_eui)
+            VALUES ('{0}', '{1}')
+            ON CONFLICT (dev_eui) DO UPDATE
+            SET join_eui='{1}' WHERE dev_eui='{0}';
         """.format(dev_eui, join_eui)
         self.db_transaction(query)
 
@@ -274,9 +237,10 @@ class ChirpstackStreams:
         device = data['dev_eui']
         print(f'Remove Device: {device}')
 
-        query = "SELECT * FROM helium_skfs WHERE dev_eui='{}';".format(device)
+        # query = "SELECT * FROM helium_skfs WHERE dev_eui='{}';".format(device)
+        query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
         # print(query)
-        data = client.db_fetch(query)[0]
+        data = self.db_fetch(query)[0]
 
         if data['dev_addr'] is not None and data['nws_key'] is not None:
             dev_addr = data['dev_addr']  # this should be a string..

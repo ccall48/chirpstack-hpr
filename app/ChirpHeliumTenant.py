@@ -4,6 +4,7 @@ import psycopg2
 import psycopg2.extras
 import redis
 from math import ceil
+import base64
 # import grpc
 from google.protobuf.json_format import MessageToDict  # MessageToJson
 import ujson
@@ -85,6 +86,10 @@ class ChirpstackTenant:
     def meta_up(self, data: dict):
         print('========== [ UPLINK ] ==========')
         print(ujson.dumps(data, indent=4))
+        # _packets = len(data['rxInfo'])
+        # _bytes = ceil(data['phyPayloadByteCount'] / 24)
+        # _total_dc = _packets * _bytes
+
         return
 
     def meta_down(self, data: dict):
@@ -106,9 +111,6 @@ class ChirpstackTenant:
                         b = message[1][b"up"]
                         pl = integration.UplinkEvent()
                         pl.ParseFromString(b)
-                        print('========== [ device UP Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_up(MessageToDict(pl))
 
                     if b"join" in message[1]:
@@ -116,8 +118,6 @@ class ChirpstackTenant:
                         pl = integration.JoinEvent()
                         pl.ParseFromString(b)
                         print('========== [ device JOIN Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_join(MessageToDict(pl))
 
                     if b"ack" in message[1]:
@@ -125,8 +125,6 @@ class ChirpstackTenant:
                         pl = integration.AckEvent()
                         pl.ParseFromString(b)
                         print('========== [ device ACK Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_ack(MessageToDict(pl))
 
                     if b"txack" in message[1]:
@@ -134,8 +132,6 @@ class ChirpstackTenant:
                         pl = integration.TxAckEvent()
                         pl.ParseFromString(b)
                         print('========== [ device TXACK Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_txack(MessageToDict(pl))
 
                     if b"log" in message[1]:
@@ -143,8 +139,6 @@ class ChirpstackTenant:
                         pl = integration.LogEvent()
                         pl.ParseFromString(b)
                         print('========== [ device LOG Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_log(MessageToDict(pl))
 
                     if b"status" in message[1]:
@@ -152,8 +146,6 @@ class ChirpstackTenant:
                         pl = integration.StatusEvent()
                         pl.ParseFromString(b)
                         print('========== [ device STATUS Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_status(MessageToDict(pl))
 
                     if b"location" in message[1]:
@@ -161,8 +153,6 @@ class ChirpstackTenant:
                         pl = integration.LocationEvent()
                         pl.ParseFromString(b)
                         print('========== [ device LOCATION Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_location(MessageToDict(pl))
 
                     if b"integration" in message[1]:
@@ -170,8 +160,6 @@ class ChirpstackTenant:
                         pl = integration.IntegrationEvent()
                         pl.ParseFromString(b)
                         print('========== [ device INTEGRATION Event] ==========')
-                        #msg = ujson.loads(MessageToJson(pl))
-                        # print(ujson.dumps(msg, indent=2))
                         self.event_integration(MessageToDict(pl))
 
             except Exception as err:
@@ -179,13 +167,16 @@ class ChirpstackTenant:
                 pass
 
     def event_up(self, data: dict):
-        #tenant = data['deviceInfo']['tenantId']
-        #no_msgs = len(data['rxInfo'])
-        #msg_bytes = data['phyPayloadByteCount']
-        #total_dc = no_msgs * (msg_bytes / 24)
-        #print(f'Tenant: {tenant} | heard by {no_msgs} hotspots | bytes {msg_bytes} | total DC {total_dc}')
-        print(ujson.dumps(data, indent=4))
-        #print(data)
+        print('========== [ device UP Event] ==========')
+        tenant = data['deviceInfo']['tenantId']
+        num_dupes = len(data['rxInfo'])
+        msg_bytes = ceil(len(base64.b64decode(data['data'])) / 24)
+        total_dc = num_dupes * msg_bytes
+        print(f'Tenant: {tenant} | {num_dupes} hotspots | DC {msg_bytes} | Total DC {total_dc}')
+        query = """
+            UPDATE helium_tenant SET dc_balance = (dc_balance - {}) WHERE tenant_id = '{}';
+        """.format(total_dc, tenant)
+        self.db_transaction(query)
         return
 
     def event_join(self, data: dict):
