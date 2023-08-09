@@ -93,16 +93,16 @@ class ChirpstackStreams:
     def create_tables(self):
         query = """
             CREATE TABLE IF NOT EXISTS helium_devices (
-                id serial primary key,
-                dev_eui text unique,    -- devices['devEui']
-                join_eui text,          -- devices['joinEui']
-                dev_addr text,          -- devices['devAddr']
+                -- id serial primary key,
+                dev_eui text primary key,   -- devices['devEui']
+                join_eui text,              -- devices['joinEui']
+                dev_addr text,              -- devices['devAddr']
                 max_copies int,
-                aps_key text,           -- devices['appSKey']
-                nws_key text,           -- devices['nwkSEncKey']
-                dev_name text,          -- devices['name']
-                fcnt_up int,            -- devices['fCntUp']
-                fcnt_down int,          -- devices['nFCntDown']
+                aps_key text,               -- devices['appSKey']
+                nws_key text,               -- devices['nwkSEncKey']
+                dev_name text,              -- devices['name']
+                fcnt_up int,                -- devices['fCntUp']
+                fcnt_down int,              -- devices['nFCntDown']
                 is_disabled bool default false
             );
             -- CREATE TABLE IF NOT EXISTS helium_skfs (
@@ -174,7 +174,7 @@ class ChirpstackStreams:
                         msg = message[1][b'request']
                         pl = api.request_log_pb2.RequestLog()
                         pl.ParseFromString(msg)
-                        req = MessageToDict(pl) #  ujson.loads(MessageToJson(pl))
+                        req = MessageToDict(pl)  # ujson.loads(MessageToJson(pl))
                         if 'method' not in req.keys():
                             continue
 
@@ -214,8 +214,8 @@ class ChirpstackStreams:
             -- INSERT INTO helium_skfs (dev_eui, join_eui)
             INSERT INTO helium_devices (dev_eui, join_eui)
             VALUES ('{0}', '{1}')
-            ON CONFLICT (dev_eui) DO UPDATE
-            SET join_eui='{1}' WHERE dev_eui='{0}';
+            ON CONFLICT (dev_eui) DO NOTHING
+            -- UPDATE SET join_eui='{1}' WHERE dev_eui='{0}';
         """.format(dev_eui, join_eui)
         self.db_transaction(query)
 
@@ -256,6 +256,7 @@ class ChirpstackStreams:
         cmd = f'hpr route euis remove -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
         Helium.config_service_cli(cmd)
         print(f'Removing EUIS -> {cmd}')
+        # delete or disable device in helium_device table.
         return
 
     def update_device_euis(self, data: dict):

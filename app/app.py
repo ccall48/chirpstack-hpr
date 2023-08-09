@@ -67,5 +67,5 @@ if __name__ == '__main__':
         # executor.submit(tenant.stream_meta)
         executor.submit(tenant.device_stream_event)
         # executor.submit(client_streams.stream_meta)
-        executor.submit(run_every, client_streams.update_tenant_table, 60)
+        executor.submit(run_every, client_streams.update_tenant_table, 600)
         executor.submit(run_every, update_device_keys, 300)

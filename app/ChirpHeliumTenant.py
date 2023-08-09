@@ -44,14 +44,6 @@ class ChirpstackTenant:
             with con.cursor() as cur:
                 cur.execute(query)
 
-    """
-    #    def db_fetch(self, query):
-    #        with psycopg2.connect(self.postges) as con:
-    #            with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-    #                cur.execute(query)
-    #                return cur.fetchall()
-    """
-
     def stream_meta(self):
         stream_key = 'stream:meta'
         last_id = '0'
@@ -89,7 +81,6 @@ class ChirpstackTenant:
         # _packets = len(data['rxInfo'])
         # _bytes = ceil(data['phyPayloadByteCount'] / 24)
         # _total_dc = _packets * _bytes
-
         return
 
     def meta_down(self, data: dict):
@@ -168,14 +159,21 @@ class ChirpstackTenant:
 
     def event_up(self, data: dict):
         print('========== [ device UP Event] ==========')
-        tenant = data['deviceInfo']['tenantId']
+        tenant_id = data['deviceInfo']['tenantId']
+        tenant_name = data['deviceInfo']['tenantName']
+        device_name = data['deviceInfo']['deviceName']
         num_dupes = len(data['rxInfo'])
         msg_bytes = ceil(len(base64.b64decode(data['data'])) / 24)
         total_dc = num_dupes * msg_bytes
-        print(f'Tenant: {tenant} | {num_dupes} hotspots | DC {msg_bytes} | Total DC {total_dc}')
+        print('Tenant:', tenant_id, '\n' +
+              'Name:', tenant_name, '\n' +
+              'Device:', device_name, '\n' +
+              'Dupes:', num_dupes, '\n' +
+              'DC:', msg_bytes, '\n' +
+              'Total DC:', total_dc)
         query = """
             UPDATE helium_tenant SET dc_balance = (dc_balance - {}) WHERE tenant_id = '{}';
-        """.format(total_dc, tenant)
+        """.format(total_dc, tenant_id)
         self.db_transaction(query)
         return
 
