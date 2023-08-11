@@ -1,10 +1,8 @@
-import os
 import psycopg2
 import psycopg2.extras
 import grpc
-from google.protobuf.json_format import MessageToJson
-import ujson
-from chirpstack_api import api  # , meta, integration, gw
+from google.protobuf.json_format import MessageToDict
+from chirpstack_api import api
 
 
 class ChirpDeviceKeys:
@@ -44,7 +42,7 @@ class ChirpDeviceKeys:
             req = api.GetDeviceRequest()
             req.dev_eui = dev_eui
             resp = client.Get(req, metadata=self.auth_token)
-            data = ujson.loads(MessageToJson(resp))['device']
+            data = MessageToDict(resp)['device']
         return data
 
     def get_device_activation(self, dev_eui: str) -> dict[str]:
@@ -53,18 +51,25 @@ class ChirpDeviceKeys:
             req = api.GetDeviceActivationRequest()
             req.dev_eui = dev_eui
             resp = client.GetActivation(req, metadata=self.auth_token)
-            data = ujson.loads(MessageToJson(resp))['deviceActivation']
+            data = MessageToDict(resp)
+            if bool(data):
+                return data['deviceActivation']
         return data
 
     def get_merged_keys(self, dev_eui: str) -> dict[str]:
-        devices = {}
+        devices = {
+            'devAddr': '',
+            'appSKey': '',
+            'nwkSEncKey': '',
+            'name': '',
+        }
+
         devices.update(self.get_device(dev_eui))
         devices.update(self.get_device_activation(dev_eui))
 
         max_copies = 0
         if devices.get('variables') and 'max_copies' in devices.get('variables'):
             max_copies = devices['variables']['max_copies']
-
         if 'fCntUp' not in devices.keys():
             devices['fCntUp'] = 0
         if 'nFCntDown' not in devices.keys():
@@ -97,4 +102,4 @@ class ChirpDeviceKeys:
             devices['nFCntDown']
         )
         self.db_transaction(query)
-        return f'Updated dev_eui: {dev_eui}'
+        return f'Updated: {dev_eui}'

@@ -46,13 +46,17 @@ if __name__ == '__main__':
     )
 
     def run_every(fn: str, interval: int):
-        name = fn
+        name = str(fn)
         while True:
-            start = time.time()
-            fn()
-            print(f'{time.ctime()} Executing {name}, sleeping {interval} seconds.')
-            stop = time.time()
-            time.sleep(interval - (stop - start))
+            try:
+                start = time.time()
+                fn()
+                print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
+                stop = time.time()
+                time.sleep(interval - (stop - start))
+            except Exception as err:
+                print(f'{name} Error: {err}')
+                pass
 
     def update_device_keys():
         updates = list(map(client_keys.get_merged_keys, client_keys.fetch_all_devices()))
@@ -62,10 +66,12 @@ if __name__ == '__main__':
     interval = 60 * 30  # 30 minutes
     client_streams.create_tables()
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         executor.submit(client_streams.api_stream_requests)
-        # executor.submit(tenant.stream_meta)
         executor.submit(tenant.device_stream_event)
-        # executor.submit(client_streams.stream_meta)
-        executor.submit(run_every, client_streams.update_tenant_table, 600)
         executor.submit(run_every, update_device_keys, 300)
+        # executor.submit(run_every, client_streams.update_tenant_table, 600)
+
+        # executor.submit(tenant.stream_meta)
+        # executor.submit(client_streams.stream_meta)
+        # executor.submit(run_every, update_device_keys, 300)

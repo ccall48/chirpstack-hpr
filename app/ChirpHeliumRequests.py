@@ -1,10 +1,7 @@
 import os
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 import psycopg2
 import psycopg2.extras
-# from paho.mqtt import client as paho_mqtt
-# from math import ceil
 import time
 import redis
 import grpc
@@ -130,7 +127,16 @@ class ChirpstackStreams:
             FROM tenant
             ON CONFLICT (tenant_id) DO NOTHING;
         """
-        print(f'Update tenants table... {time.ctime()}')
+        print(f'Updated tenant table... {time.ctime()}')
+        self.db_transaction(query)
+        return
+
+    def disable_tenant(self, tenant_id):
+        query = """
+            UPDATE helium_tenant
+            SET is_disabled=true
+            WHERE tenant_id='{}'
+        """.format(tenant_id)
         self.db_transaction(query)
 
     def fetch_active_devices(self) -> list[str]:
@@ -138,35 +144,13 @@ class ChirpstackStreams:
         result = [device['dev_eui'].hex() for device in self.db_fetch(query)]
         return result
 
-    #def update_helium_skfs(self):
-    #    #devs = self.get_device_request_data()
-    #    # need another query to update max_copies & join_eui...?
-    #    active_devices = self.fetch_active_devices()
-    #    devices = list(map(self.get_device_activation, active_devices))
-    #    for device in devices:
-    #        dev_eui = device['devEui']
-    #        # join_eui = device['join_eui']
-    #        dev_addr = device['devAddr']
-    #        nws_key = device['nwkSEncKey']
-    #        query = """
-    #            INSERT INTO helium_skfs (dev_eui, dev_addr, nws_key)
-    #            VALUES ('{0}', '{1}', '{2}')
-    #            ON CONFLICT (dev_eui) DO
-    #            UPDATE SET
-    #                dev_eui='{0}',
-    #                dev_addr='{1}',
-    #                nws_key='{2}'
-    #            WHERE helium_skfs.dev_eui='{0}';
-    #        """.format(dev_eui, dev_addr, nws_key)
-    #        self.db_transaction(query)
-    #        print(query)
-
     def api_stream_requests(self):
         stream_key = "api:stream:request"
         last_id = '0'
         while True:
             try:
                 resp = rdb.xread({stream_key: last_id}, count=1, block=0)
+
                 for message in resp[0][1]:
                     last_id = message[0]
 
@@ -174,23 +158,42 @@ class ChirpstackStreams:
                         msg = message[1][b'request']
                         pl = api.request_log_pb2.RequestLog()
                         pl.ParseFromString(msg)
-                        req = MessageToDict(pl)  # ujson.loads(MessageToJson(pl))
+                        req = MessageToDict(pl)
                         if 'method' not in req.keys():
                             continue
 
-                        match req['method']:
-                            case 'Create':
-                                print('==========[ API=DEVICE Create DEVICE EUIs... ]==========')
-                                print(MessageToJson(pl))
-                                self.add_device_euis(req['metadata'])
-                            case 'Delete':
-                                print('==========[ API=DEVICE Delete DEVICE EUIs... ]==========')
-                                print(MessageToJson(pl))
-                                self.remove_device_euis(req['metadata'])
-                            case 'Update':
-                                print('==========[ API=DEVICE Update DEVICE EUIs... ]==========')
-                                print(MessageToJson(pl))
-                                self.update_device_euis(req['metadata'])
+                        match req['service']:
+                            case 'api.TenantService':
+
+                                if req['method'] == 'Create':
+                                    print('========== API Create Tenant ==========>')
+                                    self.update_tenant_table()
+
+                                if req['method'] == 'Delete':
+                                    print('========== API Delete Tenant ==========>')
+                                    # currently just disables tenant...
+                                    tenant_id = req['metadata']['tenant_id']
+                                    self.disable_tenant(tenant_id)
+
+                                if req['method'] == 'Update':
+                                    print('========== API Update Tenant ==========>')
+                                    self.update_tenant_table()
+
+                            case 'api.DeviceService':
+                                if req['method'] == 'Create':
+                                    print('========== API Create Euis ==========>')
+                                    print(MessageToJson(pl))
+                                    self.add_device_euis(req['metadata'])
+
+                                if req['method'] == 'Delete':
+                                    print('========== API Delete Euis ==========>')
+                                    print(MessageToJson(pl))
+                                    self.remove_device_euis(req['metadata'])
+
+                                if req['method'] == 'Update':
+                                    print('========== API Update Euis ==========>')
+                                    print(MessageToJson(pl))
+                                    self.update_device_euis(req['metadata'])
 
             except Exception as err:
                 print(f'api_stream_requests: {err}')
@@ -237,7 +240,6 @@ class ChirpstackStreams:
         device = data['dev_eui']
         print(f'Remove Device: {device}')
 
-        # query = "SELECT * FROM helium_skfs WHERE dev_eui='{}';".format(device)
         query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
         # print(query)
         data = self.db_fetch(query)[0]
