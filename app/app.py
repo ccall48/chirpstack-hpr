@@ -70,6 +70,7 @@ if __name__ == '__main__':
         executor.submit(client_streams.api_stream_requests)
         executor.submit(tenant.device_stream_event)
         executor.submit(run_every, update_device_keys, 300)
+
         # executor.submit(run_every, client_streams.update_tenant_table, 600)
 
         # executor.submit(tenant.stream_meta)

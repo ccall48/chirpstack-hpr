@@ -1,6 +1,7 @@
 .env
 *.bin
 docker-compose-dev.yml
+testing/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
