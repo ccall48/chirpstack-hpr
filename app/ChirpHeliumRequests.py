@@ -38,6 +38,14 @@ class ChirpstackStreams:
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
+    def config_service_cli(self, cmd: str):
+        p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
+        out, err = p.communicate()
+        if err:
+            return err
+        print(out)
+        return out
+
     def db_transaction(self, query):
         with psycopg2.connect(self.postges) as con:
             with con.cursor() as cur:
@@ -94,7 +102,7 @@ class ChirpstackStreams:
                 dev_eui text primary key,   -- devices['devEui']
                 join_eui text,              -- devices['joinEui']
                 dev_addr text,              -- devices['devAddr']
-                max_copies int,
+                max_copies int,             -- set as configuration variable
                 aps_key text,               -- devices['appSKey']
                 nws_key text,               -- devices['nwkSEncKey']
                 dev_name text,              -- devices['name']
@@ -102,14 +110,6 @@ class ChirpstackStreams:
                 fcnt_down int,              -- devices['nFCntDown']
                 is_disabled bool default false
             );
-            -- CREATE TABLE IF NOT EXISTS helium_skfs (
-            --     id serial primary key,
-            --     dev_eui text unique,
-            --     join_eui text,
-            --     dev_addr text,
-            --     nws_key text,
-            --     max_copies int
-            -- );
             CREATE TABLE IF NOT EXISTS helium_tenant (
                 tenant_id uuid primary key,
                 tenant_name text,
@@ -223,8 +223,8 @@ class ChirpstackStreams:
         self.db_transaction(query)
 
         cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} --commit'
-        Helium.config_service_cli(cmd)
-        print('==[ ^ ADD EUIS debug... ^ ]==>')
+        self.config_service_cli(cmd)
+        print('==[ ADD EUIS debug... ]==>')
         return
 
     def remove_device_euis(self, data: dict):
@@ -249,14 +249,14 @@ class ChirpstackStreams:
             nws_key = data['nws_key']    # this should be a string..
             # if set remove dev_addr and nws_key from skfs's
             cmd = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-            Helium.config_service_cli(cmd)
+            self.config_service_cli(cmd)
             print(f'Removing SKFS -> {cmd}')
 
         dev_eui = data['dev_eui']  # this should be a string..
         join_eui = data['join_eui']  # this should be a string..
         # remove device eui and join eui for device from router.
         cmd = f'hpr route euis remove -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
-        Helium.config_service_cli(cmd)
+        self.config_service_cli(cmd)
         print(f'Removing EUIS -> {cmd}')
         # delete or disable device in helium_device table.
         return
@@ -278,8 +278,8 @@ class ChirpstackStreams:
             cmd = f'hpr route euis remove -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
         else:
             cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
-        Helium.config_service_cli(cmd)
-        print('==[ ^ UPDATE EUIS debug... ^ ]==>')
+        self.config_service_cli(cmd)
+        print('==[ UPDATE EUIS debug... ]==>')
         return
 
     def device_stream_event(self):
@@ -409,11 +409,11 @@ class ChirpstackStreams:
             pass
 
 
-class Helium:
-    def config_service_cli(cmd: str):
-        p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
-        out, err = p.communicate()
-        if err:
-            return err
-        print(out)
-        return out
+# class Helium:
+#     def config_service_cli(cmd: str):
+#         p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
+#         out, err = p.communicate()
+#         if err:
+#             return err
+#         print(out)
+#         return out

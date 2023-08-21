@@ -58,7 +58,7 @@ if __name__ == '__main__':
                 print(f'{name} Error: {err}')
                 pass
 
-    def update_device_keys():
+    def update_device_status():
         updates = list(map(client_keys.get_merged_keys, client_keys.fetch_all_devices()))
         print('\n'.join(updates))
         return
@@ -69,10 +69,5 @@ if __name__ == '__main__':
     with ThreadPoolExecutor(max_workers=4) as executor:
         executor.submit(client_streams.api_stream_requests)
         executor.submit(tenant.device_stream_event)
-        executor.submit(run_every, update_device_keys, 300)
-
-        # executor.submit(run_every, client_streams.update_tenant_table, 600)
-
-        # executor.submit(tenant.stream_meta)
-        # executor.submit(client_streams.stream_meta)
-        # executor.submit(run_every, update_device_keys, 300)
+        executor.submit(run_every, client_keys.helium_skfs_update, 600)
+        executor.submit(run_every, update_device_status, 300)

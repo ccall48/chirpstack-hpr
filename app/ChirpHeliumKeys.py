@@ -1,5 +1,7 @@
+import subprocess
 import psycopg2
 import psycopg2.extras
+import ujson
 import grpc
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import api
@@ -25,7 +27,21 @@ class ChirpDeviceKeys:
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
-    def db_transaction(self, query):
+    def config_service_cli(self, cmd: str):
+        p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
+        out, err = p.communicate()
+        if err:
+            return err
+        # print(out)
+        return out
+
+    def db_fetch(self, query: str):
+        with psycopg2.connect(self.postges) as con:
+            with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(query)
+                return cur.fetchall()
+
+    def db_transaction(self, query: str):
         with psycopg2.connect(self.postges) as con:
             with con.cursor() as cur:
                 cur.execute(query)
@@ -103,3 +119,54 @@ class ChirpDeviceKeys:
         )
         self.db_transaction(query)
         return f'Updated: {dev_eui}'
+
+    def helium_skfs_update(self):
+        """
+        TODO:
+            run function on a device join success, or on a device update.
+        """
+        helium_devices = """
+            SELECT dev_addr, nws_key, max_copies FROM helium_devices WHERE is_disabled=false;
+        """
+        all_helium_devices = self.db_fetch(helium_devices)
+
+        cmd = f'hpr route skfs list --route-id {self.route_id}'
+        skfs_list = ujson.loads(self.config_service_cli(cmd))
+
+        for device in skfs_list:
+            dev_addr = device['devaddr']
+            nws_key = device['session_key']
+            max_copies = device['max_copies']
+            # print(dev_addr, nws_key, max_copies)
+            if any(
+                x['dev_addr'] == dev_addr and
+                x['nws_key'] == nws_key and
+                x['max_copies'] == max_copies
+                for x in all_helium_devices
+            ):
+                print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
+                continue
+            else:
+                remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
+                print(f'DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}')
+                self.config_service_cli(remove_skfs)
+
+        for devices in all_helium_devices:
+            dev_addr = devices['dev_addr']
+            nws_key = devices['nws_key']
+            max_copies = devices['max_copies']
+            # print(dev_addr, nws_key, max_copies)
+            if any(x['devaddr'] == dev_addr and
+                   x['session_key'] == nws_key and
+                   x['max_copies'] == max_copies
+                   for x in skfs_list
+                   ):
+                print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
+                continue
+
+            remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
+            print(f'DEVICE NOT FOUND -> {remove_skfs}')
+            self.config_service_cli(remove_skfs)
+            add_skfs = f'hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c'
+            print(f'ADDING DEVICE -> {add_skfs}')
+            self.config_service_cli(add_skfs)
