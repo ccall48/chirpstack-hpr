@@ -143,7 +143,7 @@ class ChirpDeviceKeys:
                 x['nws_key'] == nws_key and
                 x['max_copies'] == max_copies
                 for x in all_helium_devices
-            ):
+                ):
                 print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
                 continue
             else:

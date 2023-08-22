@@ -6,7 +6,6 @@ import time
 import redis
 import grpc
 from google.protobuf.json_format import MessageToJson, MessageToDict
-import ujson
 from chirpstack_api import api, meta, integration
 
 
@@ -74,7 +73,7 @@ class ChirpstackStreams:
             req = api.GetDeviceRequest()
             req.dev_eui = dev_eui
             resp = client.Get(req, metadata=self.auth_token)
-            data = MessageToDict(resp)['device']  # ujson.loads(MessageToJson(resp))['device']
+            data = MessageToDict(resp)['device']
         return data['devEui'], data['joinEui']
 
     def get_device_request_data(self, dev_eui: str):
@@ -83,7 +82,7 @@ class ChirpstackStreams:
             req = api.GetDeviceRequest()
             req.dev_eui = dev_eui
             resp = client.Get(req, metadata=self.auth_token)
-            data = MessageToDict(resp)['device']  # ujson.loads(MessageToJson(resp))['device']
+            data = MessageToDict(resp)['device']
         return data
 
     def get_device_activation(self, dev_eui: str):
@@ -92,22 +91,23 @@ class ChirpstackStreams:
             req = api.GetDeviceActivationRequest()
             req.dev_eui = dev_eui
             resp = client.GetActivation(req, metadata=self.auth_token)
-            data = MessageToDict(resp)['deviceActivation']  # ujson.loads(MessageToJson(resp))['deviceActivation']
+            data = MessageToDict(resp)['deviceActivation']
         return data
 
     def create_tables(self):
         query = """
             CREATE TABLE IF NOT EXISTS helium_devices (
                 -- id serial primary key,
-                dev_eui text primary key,   -- devices['devEui']
-                join_eui text,              -- devices['joinEui']
-                dev_addr text,              -- devices['devAddr']
-                max_copies int,             -- set as configuration variable
-                aps_key text,               -- devices['appSKey']
-                nws_key text,               -- devices['nwkSEncKey']
-                dev_name text,              -- devices['name']
-                fcnt_up int,                -- devices['fCntUp']
-                fcnt_down int,              -- devices['nFCntDown']
+                dev_eui text primary key,           -- devices['devEui']
+                join_eui text,                      -- devices['joinEui']
+                dev_addr text,                      -- devices['devAddr']
+                max_copies int,                     -- set as configuration variable
+                aps_key text,                       -- devices['appSKey']
+                nws_key text,                       -- devices['nwkSEncKey']
+                dev_name text,                      -- devices['name']
+                fcnt_up int,                        -- devices['fCntUp']
+                fcnt_down int,                      -- devices['nFCntDown']
+                dc_used int default 0,              -- 2_147_483_647 int max
                 is_disabled bool default false
             );
             CREATE TABLE IF NOT EXISTS helium_tenant (
@@ -132,11 +132,7 @@ class ChirpstackStreams:
         return
 
     def disable_tenant(self, tenant_id):
-        query = """
-            UPDATE helium_tenant
-            SET is_disabled=true
-            WHERE tenant_id='{}'
-        """.format(tenant_id)
+        query = "UPDATE helium_tenant SET is_disabled=true WHERE tenant_id='{}';".format(tenant_id)
         self.db_transaction(query)
 
     def fetch_active_devices(self) -> list[str]:
@@ -201,8 +197,7 @@ class ChirpstackStreams:
 
     def add_device_euis(self, data: dict):
         """
-        TODO:
-            on device being added using chirpstack webui or api
+        On device being added using chirpstack webui or api
             - add device euis to hpr
             - add device to helium_devices db
         """
@@ -214,7 +209,6 @@ class ChirpstackStreams:
         print(f'Add Device EUIs: {dev_eui}, {join_eui}')
 
         query = """
-            -- INSERT INTO helium_skfs (dev_eui, join_eui)
             INSERT INTO helium_devices (dev_eui, join_eui)
             VALUES ('{0}', '{1}')
             ON CONFLICT (dev_eui) DO NOTHING
@@ -229,10 +223,9 @@ class ChirpstackStreams:
 
     def remove_device_euis(self, data: dict):
         """
-        TODO:
-            on device being removed using chirpstack webui or api
+        On device being removed using chirpstack webui or api.
             - call device from helium_devices db on delete and remove from hpr device euis
-            - call devaddr and nws keys to be removed from
+            - call dev_addr and nws_keys to be removed from hpr skfs
         """
         if 'dev_eui' not in data.keys():
             return
@@ -245,16 +238,16 @@ class ChirpstackStreams:
         data = self.db_fetch(query)[0]
 
         if data['dev_addr'] is not None and data['nws_key'] is not None:
-            dev_addr = data['dev_addr']  # this should be a string..
-            nws_key = data['nws_key']    # this should be a string..
+            dev_addr = data['dev_addr']  # this should be a string
+            nws_key = data['nws_key']    # this should be a string
             # if set remove dev_addr and nws_key from skfs's
             cmd = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
             self.config_service_cli(cmd)
             print(f'Removing SKFS -> {cmd}')
 
-        dev_eui = data['dev_eui']  # this should be a string..
-        join_eui = data['join_eui']  # this should be a string..
-        # remove device eui and join eui for device from router.
+        dev_eui = data['dev_eui']    # this should be a string
+        join_eui = data['join_eui']  # this should be a string
+        # remove euis, device eui and join eui for device from router
         cmd = f'hpr route euis remove -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
         self.config_service_cli(cmd)
         print(f'Removing EUIS -> {cmd}')
@@ -263,9 +256,8 @@ class ChirpstackStreams:
 
     def update_device_euis(self, data: dict):
         """
-        TODO:
-            on device being disabled in chirpstack webui or api
-            - remove from hpr device euis on disable toggle
+        On device being disabled in chirpstack webui or api
+            - remove device euis on disable toggle from hpr
             - add device euis to hpr on enable toggle
         """
         if 'dev_eui' not in data.keys():
@@ -407,13 +399,3 @@ class ChirpstackStreams:
         except Exception as err:
             print(f'gw_stream_frame: {err}')
             pass
-
-
-# class Helium:
-#     def config_service_cli(cmd: str):
-#         p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
-#         out, err = p.communicate()
-#         if err:
-#             return err
-#         print(out)
-#         return out
