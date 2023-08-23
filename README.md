@@ -1,15 +1,18 @@
 # Chirpstack-hpr (Chirpstack -> Helium Packet Router).
-<p>this project aims to be a simple container to leverage the helium packet config cli using python to interface between chirpstack v4 and the helium packet router cli. it's main focus at the moment is to replicate actions taken in Chirpstack v4 by a tenant to add/update/remove device euis to the helium packet router when a device is actioned by a tenant.</p>
-<p>you will need to make sure this container connects to the same container your chirpstack instance is running on so that it can interact with it when changes are made.</p>
+<p>
+this project aims to be a simple container to leverage the helium packet config cli using python to interface between chirpstack v4 and the helium packet router cli. it's main focus at the moment is to replicate actions taken in Chirpstack v4 by a tenant to add/update/remove device euis to the helium packet router when a device is actioned by a tenant.</p>
+<p>
+you will need to make sure this container connects to the same network the container your chirpstack instance is running on so that it can interact with it when changes are made.
+</p>
 
 ## Helium Openlns
 - Own your own helium OUI.
-- Purchase your own devaddr block (min block 8).
-- Your own (Chirpstack)[https://github.com/chirpstack/chirpstack] instance.
+- Purchase your own devaddr block (min block 8) or have a NetID.
+- Your own [Chirpstack](https://github.com/chirpstack/chirpstack) instance.
 - Chirpstack gateway bridges setup to accept gwmp on regions you intend on allowing to connect to your server.
 
 ## Initial Helium Setup
-- (Helium Roaming Quickstart)[https://docs.helium.com/iot/lorawan-roaming/#roaming-quickstart]
+- [Helium Roaming Quickstart](https://docs.helium.com/iot/lorawan-roaming/#roaming-quickstart)
 
 ## Create chirpstack integration database.
 You must create a separate database for handling the chirpstack integration.<br />
