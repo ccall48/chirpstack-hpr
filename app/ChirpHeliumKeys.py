@@ -32,7 +32,6 @@ class ChirpDeviceKeys:
         out, err = p.communicate()
         if err:
             return err
-        # print(out)
         return out
 
     def db_fetch(self, query: str):
@@ -106,17 +105,16 @@ class ChirpDeviceKeys:
                 dev_name = '{6}',
                 fcnt_up = '{7}',
                 fcnt_down = '{8}';
-        """.format(
-            devices['devEui'],
-            devices['joinEui'],
-            devices['devAddr'],
-            max_copies,
-            devices['appSKey'],
-            devices['nwkSEncKey'],
-            devices['name'],
-            devices['fCntUp'],
-            devices['nFCntDown']
-        )
+        """.format(devices['devEui'],
+                   devices['joinEui'],
+                   devices['devAddr'],
+                   max_copies,
+                   devices['appSKey'],
+                   devices['nwkSEncKey'],
+                   devices['name'],
+                   devices['fCntUp'],
+                   devices['nFCntDown']
+                   )
         self.db_transaction(query)
         return f'Updated: {dev_eui}'
 
@@ -138,12 +136,11 @@ class ChirpDeviceKeys:
             nws_key = device['session_key']
             max_copies = device['max_copies']
             # print(dev_addr, nws_key, max_copies)
-            if any(
-                x['dev_addr'] == dev_addr and
-                x['nws_key'] == nws_key and
-                x['max_copies'] == max_copies
-                for x in all_helium_devices
-                ):
+            if any(x['dev_addr'] == dev_addr and
+                   x['nws_key'] == nws_key and
+                   x['max_copies'] == max_copies
+                   for x in all_helium_devices
+                   ):
                 print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
                 continue
             else:

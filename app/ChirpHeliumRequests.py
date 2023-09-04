@@ -259,6 +259,7 @@ class ChirpstackStreams:
         On device being disabled in chirpstack webui or api
             - remove device euis on disable toggle from hpr
             - add device euis to hpr on enable toggle
+            - update device device status to is_disabled in helium_devices
         """
         if 'dev_eui' not in data.keys():
             return
@@ -268,8 +269,12 @@ class ChirpstackStreams:
         dev_eui, join_eui = self.get_device_request(device)
         if is_disabled == 'true':
             cmd = f'hpr route euis remove -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
+            query = "UPDATE helium_devices SET is_disabled=true WHERE dev_eui='{}';".format(dev_eui)
+            self.db_transaction(query)
         else:
             cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
+            query = "UPDATE helium_devices SET is_disabled=false WHERE dev_eui='{}';".format(dev_eui)
+            self.db_transaction(query)
         self.config_service_cli(cmd)
         print('==[ UPDATE EUIS debug... ]==>')
         return
@@ -371,31 +376,31 @@ class ChirpstackStreams:
             print(f'stream_meta: {err}')
             pass
 
-    def gw_stream_frame(self):
-        stream_key = 'gw:stream:frame'
-        last_id = '0'
-        try:
-            while True:
-                resp = rdb.xread({stream_key: last_id}, count=1, block=0)
-
-                for message in resp[0][1]:
-                    last_id = message[0]
-
-                    if b"up" in message[1]:
-                        b = message[1][b"up"]
-                        pl = api.frame_log_pb2.UplinkFrameLog()
-                        pl.ParseFromString(b)
-                        print("==========[UPLINK Gateway FRAME message...]==========")
-                        print(MessageToJson(pl))
-                        # client.publish("gateway/frame/up", MessageToJson(pl))
-
-                    if b"down" in message[1]:
-                        b = message[1][b"down"]
-                        pl = api.frame_log_pb2.DownlinkFrameLog()
-                        pl.ParseFromString(b)
-                        print("==========[DOWNLINK Gateway FRAME message...]==========")
-                        print(MessageToJson(pl))
-                        # client.publish("gateway/frame/down", MessageToJson(pl))
-        except Exception as err:
-            print(f'gw_stream_frame: {err}')
-            pass
+#    def gw_stream_frame(self):
+#        stream_key = 'gw:stream:frame'
+#        last_id = '0'
+#        try:
+#            while True:
+#                resp = rdb.xread({stream_key: last_id}, count=1, block=0)
+#
+#                for message in resp[0][1]:
+#                    last_id = message[0]
+#
+#                    if b"up" in message[1]:
+#                        b = message[1][b"up"]
+#                        pl = api.frame_log_pb2.UplinkFrameLog()
+#                        pl.ParseFromString(b)
+#                        print("==========[UPLINK Gateway FRAME message...]==========")
+#                        print(MessageToJson(pl))
+#                        # client.publish("gateway/frame/up", MessageToJson(pl))
+#
+#                    if b"down" in message[1]:
+#                        b = message[1][b"down"]
+#                        pl = api.frame_log_pb2.DownlinkFrameLog()
+#                        pl.ParseFromString(b)
+#                        print("==========[DOWNLINK Gateway FRAME message...]==========")
+#                        print(MessageToJson(pl))
+#                        # client.publish("gateway/frame/down", MessageToJson(pl))
+#        except Exception as err:
+#            print(f'gw_stream_frame: {err}')
+#            pass

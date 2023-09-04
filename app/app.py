@@ -64,10 +64,13 @@ if __name__ == '__main__':
         return
 
     interval = 60 * 30  # 30 minutes
-    client_streams.create_tables()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    client_streams.create_tables()
+    client_streams.update_tenant_table()
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
         executor.submit(client_streams.api_stream_requests)
         executor.submit(tenant.device_stream_event)
+        executor.submit(tenant.stream_meta)
         executor.submit(run_every, client_keys.helium_skfs_update, 600)
         executor.submit(run_every, update_device_status, 300)
