@@ -58,7 +58,6 @@ class ChirpstackTenant:
                         b = message[1][b"up"]
                         pl = meta.meta_pb2.UplinkMeta()
                         pl.ParseFromString(b)
-                        # print('========== [ UPLINK ] ==========')
                         data = MessageToDict(pl)
                         self.meta_up(data)
 
@@ -66,7 +65,6 @@ class ChirpstackTenant:
                         b = message[1][b"down"]
                         pl = meta.meta_pb2.DownlinkMeta()
                         pl.ParseFromString(b)
-                        # print('========== [ DOWNLINK ] ==========')
                         data = MessageToDict(pl)
                         self.meta_down(data)
 
@@ -76,16 +74,27 @@ class ChirpstackTenant:
             pass
 
     def meta_up(self, data: dict):
-        print('========== [ UPLINK ] ==========')
+        print('========== [ META = UPLINK ] ==========')
         print(ujson.dumps(data, indent=4))
-        # _packets = len(data['rxInfo'])
-        # _bytes = ceil(data['phyPayloadByteCount'] / 24)
-        # _total_dc = _packets * _bytes
+        dev_eui = data['devEui']
+        dupes = len(data['rxInfo'])
+        dc = ceil(data['phyPayloadByteCount'] / 24)
+        total_dc = dupes * dc
+        query = """
+            UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
+        """.format(total_dc, dev_eui)
+        self.db_transaction(query)
         return
 
     def meta_down(self, data: dict):
-        print('========== [ DOWNLINK ] ==========')
+        print('========== [ META = DOWNLINK ] ==========')
         print(ujson.dumps(data, indent=4))
+        dev_eui = data['devEui']
+        total_dc = ceil(data['phyPayloadByteCount'] / 24)
+        query = """
+            UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
+        """.format(total_dc, dev_eui)
+        self.db_transaction(query)
         return
 
     def device_stream_event(self):
@@ -108,7 +117,6 @@ class ChirpstackTenant:
                         b = message[1][b"join"]
                         pl = integration.JoinEvent()
                         pl.ParseFromString(b)
-                        print('========== [ device JOIN Event] ==========')
                         self.event_join(MessageToDict(pl))
 
                     if b"ack" in message[1]:
@@ -136,7 +144,6 @@ class ChirpstackTenant:
                         b = message[1][b"status"]
                         pl = integration.StatusEvent()
                         pl.ParseFromString(b)
-                        print('========== [ device STATUS Event] ==========')
                         self.event_status(MessageToDict(pl))
 
                     if b"location" in message[1]:
@@ -178,7 +185,22 @@ class ChirpstackTenant:
         return
 
     def event_join(self, data: dict):
-        print(ujson.dumps(data, indent=4))
+        print('========== [ device JOIN Event] ==========')
+        tenant_id = data['deviceInfo']['tenantId']
+        tenant_name = data['deviceInfo']['tenantName']
+        device_name = data['deviceInfo']['deviceName']
+        dev_eui = data['deviceInfo']['devEui']
+        total_dc = 1
+        print('Tenant:', tenant_id, '\n' +
+              'Name:', tenant_name, '\n' +
+              'Device:', device_name, '\n' +
+              'Dev_Eui:', dev_eui, '\n' +
+              'Total DC:', total_dc)
+        query = """
+            UPDATE helium_tenant SET dc_balance = (dc_balance - {}) WHERE tenant_id = '{}';
+        """.format(total_dc, tenant_id)
+        self.db_transaction(query)
+        # print(ujson.dumps(data, indent=4))
         return
 
     def event_ack(self, data: dict):
@@ -194,7 +216,22 @@ class ChirpstackTenant:
         return
 
     def event_status(self, data: dict):
-        print(ujson.dumps(data, indent=4))
+        print('========== [ device STATUS Event] ==========')
+        tenant_id = data['deviceInfo']['tenantId']
+        tenant_name = data['deviceInfo']['tenantName']
+        device_name = data['deviceInfo']['deviceName']
+        dev_eui = data['deviceInfo']['devEui']
+        total_dc = 1
+        print('Tenant:', tenant_id, '\n' +
+              'Name:', tenant_name, '\n' +
+              'Device:', device_name, '\n' +
+              'Dev_Eui:', dev_eui, '\n' +
+              'Total DC:', total_dc)
+        query = """
+            UPDATE helium_tenant SET dc_balance = (dc_balance - {}) WHERE tenant_id = '{}';
+        """.format(total_dc, tenant_id)
+        self.db_transaction(query)
+        # print(ujson.dumps(data, indent=4))
         return
 
     def event_location(self, data: dict):
