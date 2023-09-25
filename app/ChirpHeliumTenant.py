@@ -83,6 +83,7 @@ class ChirpstackTenant:
         query = """
             UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
         """.format(total_dc, dev_eui)
+        print(f'UPLINK DC USED: {query}')
         self.db_transaction(query)
         return
 
@@ -94,6 +95,7 @@ class ChirpstackTenant:
         query = """
             UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
         """.format(total_dc, dev_eui)
+        print(f'DOWNLINK DC USED: {query}')
         self.db_transaction(query)
         return
 
