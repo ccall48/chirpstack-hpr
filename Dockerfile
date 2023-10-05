@@ -6,6 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
+COPY bin/helium-config-service-cli /usr/local/bin/hpr
+COPY app/* .
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+
+ENTRYPOINT ["python3", "app.py"]
 #RUN pip install --no-cache-dir -r requirements.txt
