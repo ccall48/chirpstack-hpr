@@ -2,11 +2,10 @@ import os
 import subprocess
 import psycopg2
 import psycopg2.extras
-import time
 import redis
 import grpc
 from google.protobuf.json_format import MessageToJson, MessageToDict
-from chirpstack_api import api, meta, integration
+from chirpstack_api import api
 
 
 # -----------------------------------------------------------------------------
@@ -97,11 +96,10 @@ class ChirpstackStreams:
     def create_tables(self):
         query = """
             CREATE TABLE IF NOT EXISTS helium_devices (
-                -- id serial primary key,
                 dev_eui text primary key,           -- devices['devEui']
                 join_eui text,                      -- devices['joinEui']
                 dev_addr text,                      -- devices['devAddr']
-                max_copies int,                     -- set as configuration variable
+                max_copies int default 0,           -- set as configuration variable
                 aps_key text,                       -- devices['appSKey']
                 nws_key text,                       -- devices['nwkSEncKey']
                 dev_name text,                      -- devices['name']
@@ -110,29 +108,8 @@ class ChirpstackStreams:
                 dc_used int default 0,              -- 2_147_483_647 int max
                 is_disabled bool default false
             );
-            CREATE TABLE IF NOT EXISTS helium_tenant (
-                tenant_id uuid primary key,
-                tenant_name text,
-                dc_balance bigint default 1000,
-                is_disabled bool default false
-            );
         """
         print('Run create tables...')
-        self.db_transaction(query)
-
-    def update_tenant_table(self):
-        query = """
-            INSERT INTO helium_tenant (tenant_id, tenant_name)
-            SELECT tenant.id, tenant.name
-            FROM tenant
-            ON CONFLICT (tenant_id) DO NOTHING;
-        """
-        print(f'Updated tenant table... {time.ctime()}')
-        self.db_transaction(query)
-        return
-
-    def disable_tenant(self, tenant_id):
-        query = "UPDATE helium_tenant SET is_disabled=true WHERE tenant_id='{}';".format(tenant_id)
         self.db_transaction(query)
 
     def fetch_active_devices(self) -> list[str]:
@@ -159,35 +136,19 @@ class ChirpstackStreams:
                             continue
 
                         match req['service']:
-                            case 'api.TenantService':
-
-                                if req['method'] == 'Create':
-                                    print('========== API Create Tenant ==========>')
-                                    self.update_tenant_table()
-
-                                if req['method'] == 'Delete':
-                                    print('========== API Delete Tenant ==========>')
-                                    # currently just disables tenant...
-                                    tenant_id = req['metadata']['tenant_id']
-                                    self.disable_tenant(tenant_id)
-
-                                if req['method'] == 'Update':
-                                    print('========== API Update Tenant ==========>')
-                                    self.update_tenant_table()
-
                             case 'api.DeviceService':
                                 if req['method'] == 'Create':
-                                    print('========== API Create Euis ==========>')
+                                    print('========== API Create Euis ==========')
                                     print(MessageToJson(pl))
                                     self.add_device_euis(req['metadata'])
 
                                 if req['method'] == 'Delete':
-                                    print('========== API Delete Euis ==========>')
+                                    print('========== API Delete Euis ==========')
                                     print(MessageToJson(pl))
                                     self.remove_device_euis(req['metadata'])
 
                                 if req['method'] == 'Update':
-                                    print('========== API Update Euis ==========>')
+                                    print('========== API Update Euis ==========')
                                     print(MessageToJson(pl))
                                     self.update_device_euis(req['metadata'])
 
@@ -218,7 +179,7 @@ class ChirpstackStreams:
 
         cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} --commit'
         self.config_service_cli(cmd)
-        print('==[ ADD EUIS debug... ]==>')
+        print('==[ ADD EUIS ]==>')
         return
 
     def remove_device_euis(self, data: dict):
@@ -234,7 +195,6 @@ class ChirpstackStreams:
         print(f'Remove Device: {device}')
 
         query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
-        # print(query)
         data = self.db_fetch(query)[0]
 
         if data['dev_addr'] is not None and data['nws_key'] is not None:
@@ -260,6 +220,7 @@ class ChirpstackStreams:
             - remove device euis on disable toggle from hpr
             - add device euis to hpr on enable toggle
             - update device device status to is_disabled in helium_devices
+            - update max_copies
         """
         if 'dev_eui' not in data.keys():
             return
@@ -278,100 +239,3 @@ class ChirpstackStreams:
         self.config_service_cli(cmd)
         print('==[ UPDATE EUIS debug... ]==>')
         return
-
-    def device_stream_event(self):
-        stream_key = "device:stream:event"
-        last_id = '0'
-        while True:
-            try:
-                resp = rdb.xread({stream_key: last_id}, count=1, block=0)
-
-                for message in resp[0][1]:
-                    last_id = message[0]
-
-                    if b"up" in message[1]:
-                        b = message[1][b"up"]
-                        pl = integration.UplinkEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE UP Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"join" in message[1]:
-                        b = message[1][b"join"]
-                        pl = integration.JoinEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE JOIN Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"ack" in message[1]:
-                        b = message[1][b"ack"]
-                        pl = integration.AckEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE ACK Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"txack" in message[1]:
-                        b = message[1][b"txack"]
-                        pl = integration.TxAckEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE TXACK Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"log" in message[1]:
-                        b = message[1][b"log"]
-                        pl = integration.LogEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE LOG Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"status" in message[1]:
-                        b = message[1][b"status"]
-                        pl = integration.StatusEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE STATUS Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"location" in message[1]:
-                        b = message[1][b"location"]
-                        pl = integration.LocationEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE LOCATION Event]==========')
-                        print(MessageToJson(pl))
-
-                    if b"integration" in message[1]:
-                        b = message[1][b"integration"]
-                        pl = integration.IntegrationEvent()
-                        pl.ParseFromString(b)
-                        print('==========[DEVICE INTEGRATION Event]==========')
-                        print(MessageToJson(pl))
-
-            except Exception as err:
-                print(f'event_log_stream: {err}')
-                pass
-
-    def stream_meta(self):
-        stream_key = 'stream:meta'
-        last_id = '0'
-        try:
-            while True:
-                resp = rdb.xread({stream_key: last_id}, count=1, block=0)
-
-                for message in resp[0][1]:
-                    last_id = message[0]
-
-                    if b"up" in message[1]:
-                        b = message[1][b"up"]
-                        pl = meta.meta_pb2.UplinkMeta()
-                        pl.ParseFromString(b)
-                        print('==========[META = UPLINK]==========')
-                        print(MessageToJson(pl))
-
-                    if b"down" in message[1]:
-                        b = message[1][b"down"]
-                        pl = meta.meta_pb2.DownlinkMeta()
-                        pl.ParseFromString(b)
-                        print('==========[META = DOWNLINK]==========')
-                        print(MessageToJson(pl))
-        except Exception as err:
-            print(f'stream_meta: {err}')
-            pass
