@@ -14,7 +14,7 @@ charset-normalizer==3.2.0
 chirpstack-api==4.4.0
 frozenlist==1.4.0
 google-api-core==2.11.1
-google-auth==2.21.0
+google-auth==2.23.2
 googleapis-common-protos==1.59.1
 grpcio==1.56.0
 grpcio-tools==1.56.0
