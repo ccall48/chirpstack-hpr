@@ -1,5 +1,4 @@
 import os
-from concurrent.futures import ThreadPoolExecutor
 import psycopg2
 import psycopg2.extras
 import redis
@@ -8,7 +7,7 @@ import base64
 # import grpc
 from google.protobuf.json_format import MessageToDict  # MessageToJson
 import ujson
-from chirpstack_api import api, gw, integration, meta
+from chirpstack_api import integration, meta
 
 
 # -----------------------------------------------------------------------------
