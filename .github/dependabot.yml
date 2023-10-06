@@ -3,7 +3,6 @@
 # Please see the documentation for all configuration options:
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 
-name: "Dependency Scanning"
 version: 2
 updates:
   - package-ecosystem: "pip" # See documentation for possible values
