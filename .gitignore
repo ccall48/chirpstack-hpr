@@ -1,7 +1,9 @@
 .env
 *.bin
-docker-compose-dev.yml
 testing/
+locations/
+h3geo/
+alchemy/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

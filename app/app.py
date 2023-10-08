@@ -13,7 +13,7 @@ if __name__ == '__main__':
     postgres_pass = os.getenv('POSTGRES_PASS')
     postgres_name = os.getenv('POSTGRES_DB')
     chirpstack_host = os.getenv('CHIRPSTACK_SERVER')
-    chirpstack_token = os.getenv('CS_APIKEY')
+    chirpstack_token = os.getenv('CHIRPSTACK_APIKEY')
 
     client_streams = ChirpstackStreams(
         route_id=route_id,

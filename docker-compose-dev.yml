@@ -1,7 +1,8 @@
 version: '3'
 services:
   chirpstack-hpr:
-    image: ghcr.io/ccall48/chirpstack-hpr:latest
+    build: .
+    image: chirpstack-hpr:latest
     container_name: chirpstack-hpr
     restart: unless-stopped
     volumes:

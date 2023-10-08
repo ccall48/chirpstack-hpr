@@ -109,7 +109,7 @@ class ChirpstackStreams:
                 is_disabled bool default false
             );
         """
-        print('Run create tables...')
+        print('Run create helium device table if not exists.')
         self.db_transaction(query)
 
     def fetch_active_devices(self) -> list[str]:
