@@ -11,7 +11,7 @@ cachetools==5.3.1
 certifi==2023.5.7
 cffi==1.15.1
 charset-normalizer==3.3.0
-chirpstack-api==4.4.0
+chirpstack-api==4.5.1
 frozenlist==1.4.0
 google-api-core==2.11.1
 google-auth==2.23.2
