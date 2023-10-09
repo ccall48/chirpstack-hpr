@@ -33,5 +33,5 @@ rsa==4.9
 six==1.16.0
 ujson==5.8.0
 urllib3==1.26.16
-xxhash==3.3.0
+xxhash==3.4.1
 yarl==1.9.2
