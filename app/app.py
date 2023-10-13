@@ -22,7 +22,7 @@ if __name__ == '__main__':
         postgres_pass=postgres_pass,
         postgres_name=postgres_name,
         chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token
+        chirpstack_token=chirpstack_token,
     )
 
     client_keys = ChirpDeviceKeys(
@@ -32,7 +32,7 @@ if __name__ == '__main__':
         postgres_pass=postgres_pass,
         postgres_name=postgres_name,
         chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token
+        chirpstack_token=chirpstack_token,
     )
 
     tenant = ChirpstackTenant(
@@ -42,7 +42,7 @@ if __name__ == '__main__':
         postgres_pass=postgres_pass,
         postgres_name=postgres_name,
         chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token
+        chirpstack_token=chirpstack_token,
     )
 
     def run_every(fn: str, interval: int):
@@ -50,8 +50,8 @@ if __name__ == '__main__':
         while True:
             try:
                 start = time.time()
-                fn()
                 print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
+                fn()
                 stop = time.time()
                 time.sleep(interval - (stop - start))
             except Exception as err:

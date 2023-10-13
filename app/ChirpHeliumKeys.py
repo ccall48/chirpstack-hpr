@@ -89,8 +89,6 @@ class ChirpDeviceKeys:
             devices['fCntUp'] = 0
         if 'nFCntDown' not in devices.keys():
             devices['nFCntDown'] = 0
-        # frame counts not in device activation after a join before a frame is seen.
-        # maybe this could be used to trigger a device session key update on hpr?
 
         query = """
             INSERT INTO helium_devices
@@ -124,7 +122,10 @@ class ChirpDeviceKeys:
             run function on a device join success, or on a device update.
         """
         helium_devices = """
-            SELECT dev_addr, nws_key, max_copies FROM helium_devices WHERE is_disabled=false;
+            SELECT dev_addr, nws_key, max_copies
+            FROM helium_devices
+            WHERE is_disabled=false
+            AND dev_addr != '';
         """
         all_helium_devices = self.db_fetch(helium_devices)
 
@@ -143,6 +144,7 @@ class ChirpDeviceKeys:
                    ):
                 print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
                 continue
+
             else:
                 remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
                 print(f'DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}')
@@ -164,6 +166,7 @@ class ChirpDeviceKeys:
             remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
             print(f'DEVICE NOT FOUND -> {remove_skfs}')
             self.config_service_cli(remove_skfs)
+
             add_skfs = f'hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c'
             print(f'ADDING DEVICE -> {add_skfs}')
             self.config_service_cli(add_skfs)

@@ -172,8 +172,7 @@ class ChirpstackStreams:
         query = """
             INSERT INTO helium_devices (dev_eui, join_eui)
             VALUES ('{0}', '{1}')
-            ON CONFLICT (dev_eui) DO NOTHING
-            -- UPDATE SET join_eui='{1}' WHERE dev_eui='{0}';
+            ON CONFLICT (dev_eui) DO NOTHING;
         """.format(dev_eui, join_eui)
         self.db_transaction(query)
 
@@ -185,8 +184,8 @@ class ChirpstackStreams:
     def remove_device_euis(self, data: dict):
         """
         On device being removed using chirpstack webui or api.
-            - call device from helium_devices db on delete and remove from hpr device euis
             - call dev_addr and nws_keys to be removed from hpr skfs
+            - call device from helium_devices db on delete and remove from hpr device euis
         """
         if 'dev_eui' not in data.keys():
             return
@@ -197,7 +196,8 @@ class ChirpstackStreams:
         query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
         data = self.db_fetch(query)[0]
 
-        if data['dev_addr'] is not None and data['nws_key'] is not None:
+        # if data['dev_addr'] is not None and data['nws_key'] is not None:
+        if data['dev_addr'] != '' and data['nws_key'] != '':
             dev_addr = data['dev_addr']  # this should be a string
             nws_key = data['nws_key']    # this should be a string
             # if set remove dev_addr and nws_key from skfs's
@@ -230,11 +230,15 @@ class ChirpstackStreams:
         dev_eui, join_eui = self.get_device_request(device)
         if is_disabled == 'true':
             cmd = f'hpr route euis remove -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
-            query = "UPDATE helium_devices SET is_disabled=true WHERE dev_eui='{}';".format(dev_eui)
+            query = """
+                UPDATE helium_devices SET is_disabled=true WHERE dev_eui='{}';
+            """.format(dev_eui)
             self.db_transaction(query)
         else:
             cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} -c'
-            query = "UPDATE helium_devices SET is_disabled=false WHERE dev_eui='{}';".format(dev_eui)
+            query = """
+                UPDATE helium_devices SET is_disabled=false WHERE dev_eui='{}';
+            """.format(dev_eui)
             self.db_transaction(query)
         self.config_service_cli(cmd)
         print('==[ UPDATE EUIS debug... ]==>')
