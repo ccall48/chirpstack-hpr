@@ -140,7 +140,7 @@ class ChirpDeviceKeys:
             dev_addr = device['devaddr']
             nws_key = device['session_key']
             max_copies = device['max_copies']
-            # print(dev_addr, nws_key, max_copies)
+            print(dev_addr, nws_key, max_copies)
             if any(x['dev_addr'] == dev_addr and
                    x['nws_key'] == nws_key and
                    x['max_copies'] == max_copies
@@ -158,7 +158,7 @@ class ChirpDeviceKeys:
             dev_addr = devices['dev_addr']
             nws_key = devices['nws_key']
             max_copies = devices['max_copies']
-            # print(dev_addr, nws_key, max_copies)
+            print(dev_addr, nws_key, max_copies)
             if any(x['devaddr'] == dev_addr and
                    x['session_key'] == nws_key and
                    x['max_copies'] == max_copies
