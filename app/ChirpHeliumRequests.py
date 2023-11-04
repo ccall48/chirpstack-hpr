@@ -37,7 +37,7 @@ class ChirpstackStreams:
         self.pg_port = postgres_port
         self.pg_ssl_mode = postgres_ssl_mode
         conn_str = f'postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}'
-        self.postgres = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
+        self.postges = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
