@@ -18,12 +18,13 @@ def publish_usage_event(dev_eui, tenant_id, application_id, dc_used):
         'application_id': application_id,
         'dc_used': dc_used
     }
-    print(usage_event)
 
     if provider == 'AWS_SQS':
         from SqsUsagePublisher import publish_to_sqs
         info_log("Publishing usage event to SQS: %s" % usage_event)
         publish_to_sqs(usage_event)
+
+    # Here maybe we could add more providers, e.g. GCP PubSub / Kafka or something.
 
     else:
         info_log("Provider %s not found" % provider)

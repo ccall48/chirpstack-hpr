@@ -1,9 +1,13 @@
 import os
 import time
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from ChirpHeliumRequests import ChirpstackStreams
 from ChirpHeliumKeys import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
+
+
+logging.basicConfig(level=logging.INFO)
 
 
 if __name__ == '__main__':
