@@ -18,6 +18,7 @@ def publish_usage_event(dev_eui, tenant_id, application_id, dc_used):
         'application_id': application_id,
         'dc_used': dc_used
     }
+    print(usage_event)
 
     if provider == 'AWS_SQS':
         from SqsUsagePublisher import publish_to_sqs
