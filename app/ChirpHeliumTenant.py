@@ -92,10 +92,11 @@ class ChirpstackTenant:
                 WHERE device.dev_eui = decode('%s', 'hex');
             """ % dev_eui
             result = self.db_fetch(query)
-            for row in result:
-                print(row)
             tenant_id = None
             application_id = None
+            for row in result:
+                tenant_id = row['tenant_id']
+                application_id = row['id']
             publish_usage_event(dev_eui, tenant_id, application_id, total_dc)
 
         return
