@@ -67,6 +67,7 @@ class ChirpstackTenant:
             pass
 
     def meta_up(self, data: dict):
+        print(data)
         dev_eui = data['devEui']
         dupes = len(data['rxInfo'])
         dc = ceil(data['phyPayloadByteCount'] / 24)
