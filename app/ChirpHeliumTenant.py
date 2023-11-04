@@ -5,6 +5,7 @@ import redis
 from math import ceil
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import meta
+from UsagePublisher import publish_usage_event
 
 # -----------------------------------------------------------------------------
 # CHIRPSTACK REDIS CONNECTION
@@ -44,6 +45,12 @@ class ChirpstackTenant:
             with con.cursor() as cur:
                 cur.execute(query)
 
+    def db_fetch(self, query):
+        with psycopg2.connect(self.postges) as con:
+            with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(query)
+                return cur.fetchall()
+
     def stream_meta(self):
         stream_key = 'stream:meta'
         last_id = '0'
@@ -67,7 +74,6 @@ class ChirpstackTenant:
             pass
 
     def meta_up(self, data: dict):
-        print(data)
         dev_eui = data['devEui']
         dupes = len(data['rxInfo'])
         dc = ceil(data['phyPayloadByteCount'] / 24)
@@ -77,4 +83,19 @@ class ChirpstackTenant:
             UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
         """.format(total_dc, dev_eui)
         self.db_transaction(query)
+
+        if os.getenv('PUBLISH_USAGE_EVENTS'):
+            # First we get the tenant id for the device...
+            query = """
+                SELECT application.tenant_id, application.id FROM application
+                JOIN device ON application.id = device.application_id
+                WHERE device.dev_eui = decode('%s', 'hex');
+            """ % dev_eui
+            result = self.db_fetch(query)
+            for row in result:
+                print(row)
+            tenant_id = None
+            application_id = None
+            publish_usage_event(dev_eui, tenant_id, application_id, total_dc)
+
         return
