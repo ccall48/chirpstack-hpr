@@ -12,6 +12,8 @@ if __name__ == '__main__':
     postgres_user = os.getenv('POSTGRES_USER')
     postgres_pass = os.getenv('POSTGRES_PASS')
     postgres_name = os.getenv('POSTGRES_DB')
+    postgres_port = os.getenv('POSTGRES_PORT', 5432)
+    postgres_ssl_mode = os.getenv('POSTGRES_SSL_MODE', "allow")
     chirpstack_host = os.getenv('CHIRPSTACK_SERVER')
     chirpstack_token = os.getenv('CHIRPSTACK_APIKEY')
 
@@ -21,6 +23,8 @@ if __name__ == '__main__':
         postgres_user=postgres_user,
         postgres_pass=postgres_pass,
         postgres_name=postgres_name,
+        postgres_port=postgres_port,
+        postgres_ssl_mode=postgres_ssl_mode,
         chirpstack_host=chirpstack_host,
         chirpstack_token=chirpstack_token,
     )
@@ -31,6 +35,8 @@ if __name__ == '__main__':
         postgres_user=postgres_user,
         postgres_pass=postgres_pass,
         postgres_name=postgres_name,
+        postgres_port=postgres_port,
+        postgres_ssl_mode=postgres_ssl_mode,
         chirpstack_host=chirpstack_host,
         chirpstack_token=chirpstack_token,
     )
@@ -41,6 +47,8 @@ if __name__ == '__main__':
         postgres_user=postgres_user,
         postgres_pass=postgres_pass,
         postgres_name=postgres_name,
+        postgres_port=postgres_port,
+        postgres_ssl_mode=postgres_ssl_mode,
         chirpstack_host=chirpstack_host,
         chirpstack_token=chirpstack_token,
     )
