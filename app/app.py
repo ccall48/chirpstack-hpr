@@ -17,7 +17,7 @@ if __name__ == '__main__':
     postgres_pass = os.getenv('POSTGRES_PASS')
     postgres_name = os.getenv('POSTGRES_DB')
     postgres_port = os.getenv('POSTGRES_PORT', 5432)
-    postgres_ssl_mode = os.getenv('POSTGRES_SSL_MODE', "allow")
+    postgres_ssl_mode = os.getenv('POSTGRES_SSL_MODE', 'allow')
     chirpstack_host = os.getenv('CHIRPSTACK_SERVER')
     chirpstack_token = os.getenv('CHIRPSTACK_APIKEY')
 
@@ -75,12 +75,13 @@ if __name__ == '__main__':
         print('\n'.join(updates))
         return
 
-    interval = 60 * 30  # 30 minutes
+    skfs_interval = 60 * 10   # 10 minutes
+    device_interval = 60 * 5  # 5 minutes
 
     client_streams.create_tables()
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         executor.submit(client_streams.api_stream_requests)
         executor.submit(tenant.stream_meta)
-        executor.submit(run_every, client_keys.helium_skfs_update, 600)
-        executor.submit(run_every, update_device_status, 300)
+        executor.submit(run_every, client_keys.helium_skfs_update, skfs_interval)
+        executor.submit(run_every, update_device_status, device_interval)

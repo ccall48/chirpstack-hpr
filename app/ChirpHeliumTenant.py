@@ -36,17 +36,20 @@ class ChirpstackTenant:
         self.pg_port = postgres_port
         self.pg_ssl_mode = postgres_ssl_mode
         conn_str = f'postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}'
-        self.postges = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
+        if self.pg_ssl_mode[0] != 'require':
+            self.postgres = conn_str
+        else:
+            self.postgres = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
     def db_transaction(self, query):
-        with psycopg2.connect(self.postges) as con:
+        with psycopg2.connect(self.postgres) as con:
             with con.cursor() as cur:
                 cur.execute(query)
 
     def db_fetch(self, query):
-        with psycopg2.connect(self.postges) as con:
+        with psycopg2.connect(self.postgres) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(query)
                 return cur.fetchall()
@@ -84,7 +87,7 @@ class ChirpstackTenant:
         """.format(total_dc, dev_eui)
         self.db_transaction(query)
 
-        if os.getenv('PUBLISH_USAGE_EVENTS'):
+        if os.getenv('PUBLISH_USAGE_EVENTS') is True:
             # First we get the tenant id for the device...
             query = """
                 SELECT application.tenant_id, application.id FROM application

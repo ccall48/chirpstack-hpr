@@ -28,7 +28,10 @@ class ChirpDeviceKeys:
         self.pg_port = postgres_port
         self.pg_ssl_mode = postgres_ssl_mode
         conn_str = f'postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}'
-        self.postges = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
+        if self.pg_ssl_mode[0] != 'require':
+            self.postgres = conn_str
+        else:
+            self.postgres = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
@@ -40,18 +43,18 @@ class ChirpDeviceKeys:
         return out
 
     def db_fetch(self, query: str):
-        with psycopg2.connect(self.postges) as con:
+        with psycopg2.connect(self.postgres) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(query)
                 return cur.fetchall()
 
     def db_transaction(self, query: str):
-        with psycopg2.connect(self.postges) as con:
+        with psycopg2.connect(self.postgres) as con:
             with con.cursor() as cur:
                 cur.execute(query)
 
     def fetch_all_devices(self) -> list[str]:
-        with psycopg2.connect(self.postges) as con:
+        with psycopg2.connect(self.postgres) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("SELECT dev_eui FROM device WHERE is_disabled=false;")
                 return [dev['dev_eui'].hex() for dev in cur.fetchall()]
