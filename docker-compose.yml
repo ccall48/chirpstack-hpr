@@ -36,6 +36,12 @@ services:
       - PUBLISH_USAGE_EVENTS_SQS_REGION=${PUBLISH_USAGE_EVENTS_SQS_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      # Usage Event Postgres Publisher (Optional)
+      - PG_EVENTS_USER=${PG_EVENTS_USER}
+      - PG_EVENTS_PASS=${PG_EVENTS_PASS}
+      - PG_EVENTS_PORT=${PG_EVENTS_PORT}
+      - PG_EVENTS_HOST=${PG_EVENTS_HOST}
+      - PG_EVENTS_DB=${PG_EVENTS_DB}
     command: bash -c 'cd /app && python app.py'
 
 networks:
