@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 # from ChirpHeliumRequests import ChirpstackStreams
@@ -7,6 +8,8 @@ from ChirpHeliumRequestsRpc import ChirpstackStreams
 from ChirpHeliumKeys import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
 
+
+logging.basicConfig(level=logging.INFO)
 
 
 if __name__ == '__main__':
