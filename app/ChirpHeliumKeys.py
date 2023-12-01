@@ -145,11 +145,6 @@ class ChirpDeviceKeys:
         logging.info(f"SKFS List: {skfs_list}")
         logging.info(f"All Helium Devices: {all_helium_devices}")
 
-        all_helium_devices_set = {
-            (d["dev_addr"], d["nws_key"]) for d in all_helium_devices
-        }
-        skfs_list_set = {(d["dev_addr"], d["nws_key"]) for d in skfs_list}
-
         # Convert the lists to sets for efficient set operations
         all_helium_devices_set = {
             (d["dev_addr"], d["nws_key"], d["max_copies"]) for d in all_helium_devices
