@@ -147,18 +147,18 @@ class ChirpDeviceKeys:
         }
         skfs_list_set = {(d["dev_addr"], d["nws_key"]) for d in skfs_list}
 
-        # Devices to add to skfs_list
-        devices_to_add = all_helium_devices_set - skfs_list_set
-        for device in devices_to_add:
-            dev_addr, nws_key = device
-            cmd = f"hpr route skfs add --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
-            self.config_service_cli(cmd)
-
         # Devices to remove from skfs_list
         devices_to_remove = skfs_list_set - all_helium_devices_set
         for device in devices_to_remove:
             dev_addr, nws_key = device
             cmd = f"hpr route skfs remove --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
+            self.config_service_cli(cmd)
+
+        # Devices to add to skfs_list
+        devices_to_add = all_helium_devices_set - skfs_list_set
+        for device in devices_to_add:
+            dev_addr, nws_key = device
+            cmd = f"hpr route skfs add --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
             self.config_service_cli(cmd)
 
         return "Updated SKFS"
