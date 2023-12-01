@@ -126,7 +126,7 @@ class ChirpDeviceKeys:
         self.db_transaction(query)
         return f"Updated: {dev_eui}"
 
-       def helium_skfs_update(self):
+    def helium_skfs_update(self):
         """
         TODO:
             run function on a device join success, or on a device update.
@@ -139,46 +139,54 @@ class ChirpDeviceKeys:
         """
         all_helium_devices = self.db_fetch(helium_devices)
 
-        cmd = f'hpr route skfs list --route-id {self.route_id}'
+        cmd = f"hpr route skfs list --route-id {self.route_id}"
         skfs_list = ujson.loads(self.config_service_cli(cmd))
 
-        logging.info(f'HELIUM DEVICES -> {all_helium_devices}')
-        logging.info(f'SKFS LIST -> {skfs_list}')
+        logging.info(f"HELIUM DEVICES -> {all_helium_devices}")
+        logging.info(f"SKFS LIST -> {skfs_list}")
 
         for device in skfs_list:
-            dev_addr = device['devaddr']
-            nws_key = device['session_key']
-            max_copies = device['max_copies']
-            if any(x['dev_addr'] == dev_addr and
-                   x['nws_key'] == nws_key and
-                   x['max_copies'] == max_copies
-                   for x in all_helium_devices
-                   ):
-                logging.info(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
+            dev_addr = device["devaddr"]
+            nws_key = device["session_key"]
+            max_copies = device["max_copies"]
+            if any(
+                x["dev_addr"] == dev_addr
+                and x["nws_key"] == nws_key
+                and x["max_copies"] == max_copies
+                for x in all_helium_devices
+            ):
+                logging.info(
+                    f"DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping..."
+                )
                 continue
 
             else:
-                remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-                logging.info(f'DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}')
+                remove_skfs = f"hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c"
+                logging.info(
+                    f"DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}"
+                )
                 self.config_service_cli(remove_skfs)
 
         for devices in all_helium_devices:
-            dev_addr = devices['dev_addr']
-            nws_key = devices['nws_key']
-            max_copies = devices['max_copies']
-            
-            if any(x['devaddr'] == dev_addr and
-                   x['session_key'] == nws_key and
-                   x['max_copies'] == max_copies
-                   for x in skfs_list
-                   ):
-                logging.info(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
+            dev_addr = devices["dev_addr"]
+            nws_key = devices["nws_key"]
+            max_copies = devices["max_copies"]
+
+            if any(
+                x["devaddr"] == dev_addr
+                and x["session_key"] == nws_key
+                and x["max_copies"] == max_copies
+                for x in skfs_list
+            ):
+                logging.info(
+                    f"DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping..."
+                )
                 continue
 
-            remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-            logging.info(f'DEVICE NOT FOUND -> {remove_skfs} Removing...')
+            remove_skfs = f"hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c"
+            logging.info(f"DEVICE NOT FOUND -> {remove_skfs} Removing...")
             self.config_service_cli(remove_skfs)
 
-            add_skfs = f'hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c'
-            logging.info(f'ADDING DEVICE -> {add_skfs}')    
+            add_skfs = f"hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c"
+            logging.info(f"ADDING DEVICE -> {add_skfs}")
             self.config_service_cli(add_skfs)
