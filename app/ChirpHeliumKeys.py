@@ -142,16 +142,20 @@ class ChirpDeviceKeys:
         cmd = f"hpr route skfs list --route-id {self.route_id}"
         skfs_list = ujson.loads(self.config_service_cli(cmd))
 
+        logging.info(f"SKFS List: {skfs_list}")
+        logging.info(f"All Helium Devices: {all_helium_devices}")
+
         all_helium_devices_set = {
             (d["dev_addr"], d["nws_key"]) for d in all_helium_devices
         }
         skfs_list_set = {(d["dev_addr"], d["nws_key"]) for d in skfs_list}
 
+        logging.info(f"SKFS List Set: {skfs_list_set}")
+        logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
+
         devices_to_remove = skfs_list_set - all_helium_devices_set
         devices_to_add = all_helium_devices_set - skfs_list_set
 
-        logging.info(f"SKFS_list: {skfs_list_set}")
-        logging.info(f"Helium_devices: {all_helium_devices_set}")
         logging.info(f"Devices_to_remove: {devices_to_remove}")
         logging.info(f"Devices_to_add: {devices_to_add}")
 
