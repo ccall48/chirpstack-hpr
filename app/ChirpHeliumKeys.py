@@ -131,13 +131,13 @@ class ChirpDeviceKeys:
         TODO:
             run function on a device join success, or on a device update.
         """
-        helium_devices_query = """
+        helium_devices = """
             SELECT dev_addr, nws_key, max_copies
             FROM helium_devices
             WHERE is_disabled=false
             AND dev_addr != '';
         """
-        all_helium_devices = self.db_fetch(helium_devices_query)
+        all_helium_devices = self.db_fetch(helium_devices)
 
         cmd = f"hpr route skfs list --route-id {self.route_id}"
         skfs_list = ujson.loads(self.config_service_cli(cmd))
@@ -150,25 +150,33 @@ class ChirpDeviceKeys:
         }
         skfs_list_set = {(d["dev_addr"], d["nws_key"]) for d in skfs_list}
 
+        # Convert the lists to sets for efficient set operations
+        all_helium_devices_set = {
+            (d["dev_addr"], d["nws_key"], d["max_copies"]) for d in all_helium_devices
+        }
+        skfs_list_set = {
+            (d["dev_addr"], d["nws_key"], d["max_copies"]) for d in skfs_list
+        }
+
         logging.info(f"SKFS List Set: {skfs_list_set}")
         logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
 
+        # Devices to remove from skfs_list
         devices_to_remove = skfs_list_set - all_helium_devices_set
+        # Devices to add to skfs_list
         devices_to_add = all_helium_devices_set - skfs_list_set
 
         logging.info(f"Devices_to_remove: {devices_to_remove}")
         logging.info(f"Devices_to_add: {devices_to_add}")
 
-        remove_cmds = [
-            f"hpr route skfs remove --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
-            for dev_addr, nws_key in devices_to_remove
-        ]
-        add_cmds = [
-            f"hpr route skfs add --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
-            for dev_addr, nws_key in devices_to_add
-        ]
+        for device in devices_to_remove:
+            dev_addr, nws_key = device
+            cmd = f"hpr route skfs remove --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
+            self.config_service_cli(cmd)
 
-        for cmd in remove_cmds:
+        for device in devices_to_add:
+            dev_addr, nws_key = device
+            cmd = f"hpr route skfs add --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
             self.config_service_cli(cmd)
-        for cmd in add_cmds:
-            self.config_service_cli(cmd)
+
+        return "Updated SKFS"
