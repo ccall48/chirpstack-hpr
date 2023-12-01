@@ -132,7 +132,7 @@ class ChirpDeviceKeys:
             run function on a device join success, or on a device update.
         """
         helium_devices_query = """
-            SELECT dev_addr, nws_key
+            SELECT dev_addr, nws_key, max_copies
             FROM helium_devices
             WHERE is_disabled=false
             AND dev_addr != '';
