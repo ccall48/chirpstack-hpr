@@ -1,13 +1,12 @@
 import os
+import asyncio
 import time
-import logging
 from concurrent.futures import ThreadPoolExecutor
-from ChirpHeliumRequests import ChirpstackStreams
+# from ChirpHeliumRequests import ChirpstackStreams
+from ChirpHeliumRequestsRpc import ChirpstackStreams
 from ChirpHeliumKeys import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
 
-
-logging.basicConfig(level=logging.INFO)
 
 
 if __name__ == '__main__':
@@ -70,18 +69,21 @@ if __name__ == '__main__':
                 print(f'{name} Error: {err}')
                 pass
 
+    def async_wrapper(corro):
+        return asyncio.run(corro())
+
     def update_device_status():
         updates = list(map(client_keys.get_merged_keys, client_keys.fetch_all_devices()))
         print('\n'.join(updates))
         return
 
-    skfs_interval = 60 * 10   # 10 minutes
-    device_interval = 60 * 5  # 5 minutes
+    skfs_int = 60 * 5   # 5 minutes
+    device_int = 60 * 5  # 5 minutes
 
     client_streams.create_tables()
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        executor.submit(client_streams.api_stream_requests)
+        executor.submit(async_wrapper, client_streams.api_stream_requests)
         executor.submit(tenant.stream_meta)
-        executor.submit(run_every, client_keys.helium_skfs_update, skfs_interval)
-        executor.submit(run_every, update_device_status, device_interval)
+        executor.submit(run_every, client_keys.helium_skfs_update, skfs_int)
+        executor.submit(run_every, update_device_status, device_int)

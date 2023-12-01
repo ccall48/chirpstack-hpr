@@ -150,12 +150,13 @@ class ChirpDeviceKeys:
                    x['max_copies'] == max_copies
                    for x in all_helium_devices
                    ):
-                print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
+                # print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
                 continue
 
             else:
                 remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-                print(f'DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}')
+                print(remove_skfs)
+                #print(f'DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}')
                 self.config_service_cli(remove_skfs)
 
         for devices in all_helium_devices:
@@ -168,11 +169,12 @@ class ChirpDeviceKeys:
                    x['max_copies'] == max_copies
                    for x in skfs_list
                    ):
-                print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
+                # print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
                 continue
 
             remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-            print(f'DEVICE NOT FOUND -> {remove_skfs}')
+            print(remove_skfs)
+            # print(f'DEVICE NOT FOUND -> {remove_skfs}')
             self.config_service_cli(remove_skfs)
 
             add_skfs = f'hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c'
