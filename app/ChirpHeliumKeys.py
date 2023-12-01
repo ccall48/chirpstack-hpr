@@ -5,6 +5,7 @@ import ujson
 import grpc
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import api
+import logging
 
 
 class ChirpDeviceKeys:
@@ -131,7 +132,7 @@ class ChirpDeviceKeys:
             run function on a device join success, or on a device update.
         """
         helium_devices_query = """
-            SELECT dev_addr, nws_key, max_copies
+            SELECT dev_addr, nws_key
             FROM helium_devices
             WHERE is_disabled=false
             AND dev_addr != '';
@@ -142,22 +143,25 @@ class ChirpDeviceKeys:
         skfs_list = ujson.loads(self.config_service_cli(cmd))
 
         all_helium_devices_set = {
-            (d["dev_addr"], d["nws_key"], d["max_copies"]) for d in all_helium_devices
+            (d["dev_addr"], d["nws_key"]) for d in all_helium_devices
         }
-        skfs_list_set = {
-            (d["dev_addr"], d["nws_key"], d["max_copies"]) for d in skfs_list
-        }
+        skfs_list_set = {(d["dev_addr"], d["nws_key"]) for d in skfs_list}
 
         devices_to_remove = skfs_list_set - all_helium_devices_set
         devices_to_add = all_helium_devices_set - skfs_list_set
 
+        logging.info(f"SKFS_list: {skfs_list_set}")
+        logging.info(f"Helium_devices: {all_helium_devices_set}")
+        logging.info(f"Devices_to_remove: {devices_to_remove}")
+        logging.info(f"Devices_to_add: {devices_to_add}")
+
         remove_cmds = [
-            f"hpr route skfs remove --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key} --max-copies {max_copies}"
-            for dev_addr, nws_key, max_copies in devices_to_remove
+            f"hpr route skfs remove --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
+            for dev_addr, nws_key in devices_to_remove
         ]
         add_cmds = [
-            f"hpr route skfs add --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key} --max-copies {max_copies}"
-            for dev_addr, nws_key, max_copies in devices_to_add
+            f"hpr route skfs add --route-id {self.route_id} --dev-addr {dev_addr} --nws-key {nws_key}"
+            for dev_addr, nws_key in devices_to_add
         ]
 
         for cmd in remove_cmds:
