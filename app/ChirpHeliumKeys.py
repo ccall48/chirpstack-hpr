@@ -5,20 +5,21 @@ import ujson
 import grpc
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import api
+import logging
 
 
 class ChirpDeviceKeys:
     def __init__(
-            self,
-            route_id: str,
-            postgres_host: str,
-            postgres_user: str,
-            postgres_pass: str,
-            postgres_name: str,
-            postgres_port: str,
-            postgres_ssl_mode: str,
-            chirpstack_host: str,
-            chirpstack_token: str,
+        self,
+        route_id: str,
+        postgres_host: str,
+        postgres_user: str,
+        postgres_pass: str,
+        postgres_name: str,
+        postgres_port: str,
+        postgres_ssl_mode: str,
+        chirpstack_host: str,
+        chirpstack_token: str,
     ):
         self.route_id = route_id
         self.pg_host = postgres_host
@@ -27,13 +28,13 @@ class ChirpDeviceKeys:
         self.pg_name = postgres_name
         self.pg_port = postgres_port
         self.pg_ssl_mode = postgres_ssl_mode
-        conn_str = f'postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}'
-        if self.pg_ssl_mode[0] != 'require':
+        conn_str = f"postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}"
+        if self.pg_ssl_mode[0] != "require":
             self.postgres = conn_str
         else:
-            self.postgres = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
+            self.postgres = "%s?sslmode=%s" % (conn_str, self.pg_ssl_mode)
         self.cs_gprc = chirpstack_host
-        self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
+        self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
 
     def config_service_cli(self, cmd: str):
         p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
@@ -57,7 +58,7 @@ class ChirpDeviceKeys:
         with psycopg2.connect(self.postgres) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("SELECT dev_eui FROM device WHERE is_disabled=false;")
-                return [dev['dev_eui'].hex() for dev in cur.fetchall()]
+                return [dev["dev_eui"].hex() for dev in cur.fetchall()]
 
     def get_device(self, dev_eui: str) -> dict[str]:
         with grpc.insecure_channel(self.cs_gprc) as channel:
@@ -65,7 +66,7 @@ class ChirpDeviceKeys:
             req = api.GetDeviceRequest()
             req.dev_eui = dev_eui
             resp = client.Get(req, metadata=self.auth_token)
-            data = MessageToDict(resp)['device']
+            data = MessageToDict(resp)["device"]
         return data
 
     def get_device_activation(self, dev_eui: str) -> dict[str]:
@@ -76,27 +77,27 @@ class ChirpDeviceKeys:
             resp = client.GetActivation(req, metadata=self.auth_token)
             data = MessageToDict(resp)
             if bool(data):
-                return data['deviceActivation']
+                return data["deviceActivation"]
         return data
 
     def get_merged_keys(self, dev_eui: str) -> dict[str]:
         devices = {
-            'devAddr': '',
-            'appSKey': '',
-            'nwkSEncKey': '',
-            'name': '',
+            "devAddr": "",
+            "appSKey": "",
+            "nwkSEncKey": "",
+            "name": "",
         }
 
         devices.update(self.get_device(dev_eui))
         devices.update(self.get_device_activation(dev_eui))
 
         max_copies = 0
-        if devices.get('variables') and 'max_copies' in devices.get('variables'):
-            max_copies = devices['variables']['max_copies']
-        if 'fCntUp' not in devices.keys():
-            devices['fCntUp'] = 0
-        if 'nFCntDown' not in devices.keys():
-            devices['nFCntDown'] = 0
+        if devices.get("variables") and "max_copies" in devices.get("variables"):
+            max_copies = devices["variables"]["max_copies"]
+        if "fCntUp" not in devices.keys():
+            devices["fCntUp"] = 0
+        if "nFCntDown" not in devices.keys():
+            devices["nFCntDown"] = 0
 
         query = """
             INSERT INTO helium_devices
@@ -111,18 +112,19 @@ class ChirpDeviceKeys:
                 dev_name = '{6}',
                 fcnt_up = '{7}',
                 fcnt_down = '{8}';
-        """.format(devices['devEui'],
-                   devices['joinEui'],
-                   devices['devAddr'],
-                   max_copies,
-                   devices['appSKey'],
-                   devices['nwkSEncKey'],
-                   devices['name'],
-                   devices['fCntUp'],
-                   devices['nFCntDown']
-                   )
+        """.format(
+            devices["devEui"],
+            devices["joinEui"],
+            devices["devAddr"],
+            max_copies,
+            devices["appSKey"],
+            devices["nwkSEncKey"],
+            devices["name"],
+            devices["fCntUp"],
+            devices["nFCntDown"],
+        )
         self.db_transaction(query)
-        return f'Updated: {dev_eui}'
+        return f"Updated: {dev_eui}"
 
     def helium_skfs_update(self):
         """
@@ -137,44 +139,42 @@ class ChirpDeviceKeys:
         """
         all_helium_devices = self.db_fetch(helium_devices)
 
-        cmd = f'hpr route skfs list --route-id {self.route_id}'
+        cmd = f"hpr route skfs list --route-id {self.route_id}"
         skfs_list = ujson.loads(self.config_service_cli(cmd))
 
-        for device in skfs_list:
-            dev_addr = device['devaddr']
-            nws_key = device['session_key']
-            max_copies = device['max_copies']
-            print(dev_addr, nws_key, max_copies)
-            if any(x['dev_addr'] == dev_addr and
-                   x['nws_key'] == nws_key and
-                   x['max_copies'] == max_copies
-                   for x in all_helium_devices
-                   ):
-                print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
-                continue
+        logging.info(f"SKFS List: {skfs_list}")
+        logging.info(f"All Helium Devices: {all_helium_devices}")
 
-            else:
-                remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-                print(f'DEVICE STALE REMOVING -> d {dev_addr} -> s {nws_key} -> m {max_copies}')
-                self.config_service_cli(remove_skfs)
+        # Convert the lists to sets for efficient set operations
+        all_helium_devices_set = {
+            (d["dev_addr"], d["nws_key"], d["max_copies"]) for d in all_helium_devices
+        }
 
-        for devices in all_helium_devices:
-            dev_addr = devices['dev_addr']
-            nws_key = devices['nws_key']
-            max_copies = devices['max_copies']
-            print(dev_addr, nws_key, max_copies)
-            if any(x['devaddr'] == dev_addr and
-                   x['session_key'] == nws_key and
-                   x['max_copies'] == max_copies
-                   for x in skfs_list
-                   ):
-                print(f'DEVICE CURRENT -> d {dev_addr} -> s {nws_key} -> m {max_copies} Skipping...')
-                continue
+        skfs_list_set = {
+            (d["devaddr"], d["session_key"], d["max_copies"]) for d in skfs_list
+        }
 
-            remove_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-            print(f'DEVICE NOT FOUND -> {remove_skfs}')
-            self.config_service_cli(remove_skfs)
+        logging.info(f"SKFS List Set: {skfs_list_set}")
+        logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
 
-            add_skfs = f'hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c'
-            print(f'ADDING DEVICE -> {add_skfs}')
-            self.config_service_cli(add_skfs)
+        # Devices to remove from skfs_list
+        devices_to_remove = skfs_list_set - all_helium_devices_set
+        # Devices to add to skfs_list
+        devices_to_add = all_helium_devices_set - skfs_list_set
+
+        logging.info(f"Devices_to_remove: {devices_to_remove}")
+        logging.info(f"Devices_to_add: {devices_to_add}")
+
+        for device in devices_to_remove:
+            dev_addr, nws_key, max_copies = device
+            cmd = f"hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c"
+            logging.info(f"Removing_skfs: {cmd}")
+            self.config_service_cli(cmd)
+
+        for device in devices_to_add:
+            dev_addr, nws_key, max_copies = device
+            cmd = f"hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c"
+            logging.info(f"Adding_skfs: {cmd}")
+            self.config_service_cli(cmd)
+
+        return "Updated SKFS"
