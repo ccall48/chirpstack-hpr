@@ -19,7 +19,7 @@ chirpstack-api==4.5.1
 click==8.1.7
 frozenlist==1.4.0
 google-api-core==2.11.1
-google-auth==2.23.2
+google-auth==2.24.0
 googleapis-common-protos==1.60.0
 grpcio==1.56.0
 grpcio-tools==1.56.0
