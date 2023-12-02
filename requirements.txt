@@ -21,7 +21,7 @@ frozenlist==1.4.0
 google-api-core==2.11.1
 google-auth==2.23.2
 googleapis-common-protos==1.60.0
-grpcio==1.56.0
+grpcio==1.59.3
 grpcio-tools==1.56.0
 grpclib==0.4.6
 h2==4.1.0
