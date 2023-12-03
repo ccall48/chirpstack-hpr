@@ -5,7 +5,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 # from ChirpHeliumRequests import ChirpstackStreams
 from ChirpHeliumRequestsRpc import ChirpstackStreams
-from ChirpHeliumKeys import ChirpDeviceKeys
+# from ChirpHeliumKeys import ChirpDeviceKeys
+from ChirpHeliumKeysRpc import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
 
 
@@ -72,6 +73,19 @@ if __name__ == '__main__':
                 print(f'{name} Error: {err}')
                 pass
 
+    def async_run_every(fn: str, interval: int):
+        name = str(fn)
+        while True:
+            try:
+                start = time.time()
+                print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
+                asyncio.run(fn())
+                stop = time.time()
+                time.sleep(interval - (stop - start))
+            except Exception as err:
+                print(f'{name} Error: {err}')
+                pass
+
     def async_wrapper(corro):
         return asyncio.run(corro())
 
@@ -88,5 +102,7 @@ if __name__ == '__main__':
     with ThreadPoolExecutor(max_workers=4) as executor:
         executor.submit(async_wrapper, client_streams.api_stream_requests)
         executor.submit(tenant.stream_meta)
-        executor.submit(run_every, client_keys.helium_skfs_update, skfs_int)
         executor.submit(run_every, update_device_status, device_int)
+        executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
+
+# ChirpDeviceKeys.helium_skfs_update

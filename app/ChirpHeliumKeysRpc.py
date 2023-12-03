@@ -1,4 +1,6 @@
-import subprocess
+import os
+from functools import wraps
+from datetime import datetime
 import psycopg2
 import psycopg2.extras
 import ujson
@@ -6,6 +8,47 @@ import grpc
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import api
 import logging
+
+import nacl.bindings
+from helium_py.crypto.keypair import Keypair
+from helium_py.crypto.keypair import SodiumKeyPair
+
+from protos.helium import iot_config
+from grpclib.client import Channel
+
+
+host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
+port = os.getenv("HELIUM_PORT", default=6080)
+oui = int(os.getenv("HELIUM_OUI", default=None))
+route_id = os.getenv('ROUTE_ID', None)
+delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
+
+with open(delegate_key, 'rb') as f:
+    skey = f.read()[1:]
+    delegate_keypair = Keypair(
+        SodiumKeyPair(
+            sk=skey,
+            pk=nacl.bindings.crypto_sign_ed25519_sk_to_pk(skey)
+        )
+    )
+
+
+def my_logger(orig_func):
+    logging.basicConfig(
+        filename='chirpstack-hpr.log',
+        filemode='a',
+        format='%(asctime)s %(levelname)s:%(name)s:%(message)s',
+        level=logging.INFO,
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
+    logging.getLogger("asyncio").setLevel(logging.INFO)
+
+    @wraps(orig_func)
+    def wrapper(*args, **kwargs):
+        logging.info(
+            f'Passed args: {args}, kwargs: {kwargs}')
+        return orig_func(*args, **kwargs)
+    return wrapper
 
 
 class ChirpDeviceKeys:
@@ -36,13 +79,6 @@ class ChirpDeviceKeys:
         self.cs_gprc = chirpstack_host
         self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
 
-    def config_service_cli(self, cmd: str):
-        p = subprocess.Popen([cmd], shell=True, stdout=subprocess.PIPE)
-        out, err = p.communicate()
-        if err:
-            return err
-        return out
-
     def db_fetch(self, query: str):
         with psycopg2.connect(self.postgres) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -57,9 +93,23 @@ class ChirpDeviceKeys:
     def fetch_all_devices(self) -> list[str]:
         with psycopg2.connect(self.postgres) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("SELECT dev_eui FROM device WHERE is_disabled=false;")
-                return [dev["dev_eui"].hex() for dev in cur.fetchall()]
+                #cur.execute("SELECT dev_eui FROM device WHERE is_disabled=false;")
+                cur.execute(
+                    """
+                    SELECT encode(dev_eui, 'hex') AS dev_eui
+                    FROM device
+                    WHERE is_disabled=false;
+                    """
+                )
+                return set([dev['dev_eui'] for dev in cur.fetchall()])
 
+    def chunker(self, seq, size):
+        return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+    ###########################################################################
+    # Chirpstack gRPC API calls
+    ###########################################################################
+    @my_logger
     def get_device(self, dev_eui: str) -> dict[str]:
         with grpc.insecure_channel(self.cs_gprc) as channel:
             client = api.DeviceServiceStub(channel)
@@ -69,6 +119,7 @@ class ChirpDeviceKeys:
             data = MessageToDict(resp)["device"]
         return data
 
+    @my_logger
     def get_device_activation(self, dev_eui: str) -> dict[str]:
         with grpc.insecure_channel(self.cs_gprc) as channel:
             client = api.DeviceServiceStub(channel)
@@ -80,6 +131,44 @@ class ChirpDeviceKeys:
                 return data["deviceActivation"]
         return data
 
+    ###########################################################################
+    # Helium gRPC API calls
+    ###########################################################################
+    @my_logger
+    async def get_route_skfs(self) -> list[dict]:
+        async with Channel(host, port) as channel:
+            service = iot_config.RouteStub(channel)
+            req = iot_config.RouteSkfListReqV1(
+                route_id=route_id,
+                timestamp=int(datetime.utcnow().timestamp()*1000),
+                signer=delegate_keypair.address.bin
+            )
+            req.signature = delegate_keypair.sign(req.SerializeToString())
+            all_skfs = []
+            async for skfs in service.list_skfs(req):
+                device = skfs.to_dict()
+                device['devaddr'] = hex(device['devaddr'])[2:]
+                if 'maxCopies' not in device.keys():
+                    device['maxCopies'] = 0
+                all_skfs.append(device)
+        return all_skfs
+
+    @my_logger
+    async def update_device_skfs(self, route_id: str, skfs_action: list):
+        async with Channel(host, port) as channel:
+            service = iot_config.RouteStub(channel)
+            req = iot_config.RouteSkfUpdateReqV1(
+                route_id=route_id,
+                updates=skfs_action,
+                timestamp=int(datetime.utcnow().timestamp()*1000),
+                signer=delegate_keypair.address.bin
+            )
+            req.signature = delegate_keypair.sign(req.SerializeToString())
+            resp = await service.update_skfs(req)
+        return ujson.dumps(resp.to_dict(), indent=2)
+
+    ###########################################################################
+    @my_logger
     def get_merged_keys(self, dev_eui: str) -> dict[str]:
         devices = {
             "devAddr": "",
@@ -126,7 +215,8 @@ class ChirpDeviceKeys:
         self.db_transaction(query)
         return f"Updated: {dev_eui}"
 
-    def helium_skfs_update(self):
+    @my_logger
+    async def helium_skfs_update(self):
         """
         TODO:
             run function on a device join success, or on a device update.
@@ -139,8 +229,7 @@ class ChirpDeviceKeys:
         """
         all_helium_devices = self.db_fetch(helium_devices)
 
-        cmd = f"hpr route skfs list --route-id {self.route_id}"
-        skfs_list = ujson.loads(self.config_service_cli(cmd))
+        skfs_list = await self.get_route_skfs()
 
         logging.info(f"SKFS List: {skfs_list}")
         logging.info(f"All Helium Devices: {all_helium_devices}")
@@ -151,7 +240,7 @@ class ChirpDeviceKeys:
         }
 
         skfs_list_set = {
-            (d["devaddr"], d["session_key"], d["max_copies"]) for d in skfs_list
+            (d["devaddr"], d["sessionKey"], d["maxCopies"]) for d in skfs_list
         }
 
         logging.info(f"SKFS List Set: {skfs_list_set}")
@@ -165,16 +254,36 @@ class ChirpDeviceKeys:
         logging.info(f"Devices_to_remove: {devices_to_remove}")
         logging.info(f"Devices_to_add: {devices_to_add}")
 
-        for device in devices_to_remove:
-            dev_addr, nws_key, max_copies = device
-            cmd = f"hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c"
-            logging.info(f"Removing_skfs: {cmd}")
-            self.config_service_cli(cmd)
+        # with rpc we can make update a max of 100 skfs in one request
+        rm_skfs = []
+        add_skfs = []
 
-        for device in devices_to_add:
-            dev_addr, nws_key, max_copies = device
-            cmd = f"hpr route skfs add -r {self.route_id} -d {dev_addr} -s {nws_key} -m {max_copies} -c"
-            logging.info(f"Adding_skfs: {cmd}")
-            self.config_service_cli(cmd)
+        if devices_to_remove:
+            rm_skfs = [
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=int(dev_addr, 16),
+                    session_key=nws_key,
+                    action=iot_config.ActionV1(1),
+                    max_copies=max_copies
+                ) for dev_addr, nws_key, max_copies in devices_to_remove
+            ]
+
+        if devices_to_remove:
+            add_skfs = [
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=int(dev_addr, 16),
+                    session_key=nws_key,
+                    action=iot_config.ActionV1(0),
+                    max_copies=max_copies
+                ) for dev_addr, nws_key, max_copies in devices_to_add
+            ]
+
+        skfs_action = rm_skfs + add_skfs
+
+        if skfs_action:
+            """Chunk updates to max size of 100 requests at a time"""
+            for group in self.chunker(skfs_action, 100):
+                logging.info(f'Chunked Update: {group}')
+                await self.update_device_skfs(self.route_id, group)
 
         return "Updated SKFS"
