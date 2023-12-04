@@ -13,7 +13,7 @@ from grpclib.client import Channel
 
 
 host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
-port = os.getenv("HELIUM_PORT", default=6080)
+port = int(os.getenv("HELIUM_PORT", default=6080))
 oui = int(os.getenv("HELIUM_OUI", default=None))
 route_id = os.getenv('ROUTE_ID', None)
 delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)

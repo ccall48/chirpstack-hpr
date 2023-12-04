@@ -7,27 +7,44 @@ services:
     restart: unless-stopped
     volumes:
       - './app:/app'
-      - '${HELIUM_CLI_PATH}:/usr/bin/hpr'
       - '${HELIUM_KEYPAIR_PATH}:/app/delegate_key.bin:ro'
     environment:
       - HELIUM_CONFIG_HOST=${HELIUM_CONFIG_HOST}
+      - HELIUM_CLI_PATH=/usr/local/bin/hpr
       - HELIUM_KEYPAIR_BIN=/app/delegate_key.bin
       - HELIUM_NET_ID=${HELIUM_NET_ID}
       - HELIUM_OUI=${HELIUM_OUI}
       - HELIUM_MAX_COPIES=${HELIUM_MAX_COPIES}
-      - SERVER_HOST=${SERVER_HOST}
-      - SERVER_IP=${SERVER_IP}
       - ROUTE_ID=${ROUTE_ID}
+      # ChirpStack (Required)
       - CHIRPSTACK_SERVER=${CHIRPSTACK_SERVER}
       - CHIRPSTACK_APIKEY=${CHIRPSTACK_APIKEY}
+      - REDIS_HOST=${REDIS_HOST}
+      # Database (Required)
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASS=${POSTGRES_PASS}
       - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_SSL_MODE=${POSTGRES_SSL_MODE}
       - POSTGRES_DB=${POSTGRES_DB}
-      - REDIS_HOST=${REDIS_HOST}
+      # Usage Event Publisher (Optional)
+      - PUBLISH_USAGE_EVENTS=${PUBLISH_USAGE_EVENTS}
+      - PUBLISH_USAGE_EVENTS_PROVIDER=${PUBLISH_USAGE_EVENTS_PROVIDER}
+      # Usage Event SQS Publisher (Optional)
+      - PUBLISH_USAGE_EVENTS_SQS_URL=${PUBLISH_USAGE_EVENTS_SQS_URL}
+      - PUBLISH_USAGE_EVENTS_SQS_REGION=${PUBLISH_USAGE_EVENTS_SQS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      # Usage Event Postgres Publisher (Optional)
+      - PG_EVENTS_USER=${PG_EVENTS_USER}
+      - PG_EVENTS_PASS=${PG_EVENTS_PASS}
+      - PG_EVENTS_PORT=${PG_EVENTS_PORT}
+      - PG_EVENTS_HOST=${PG_EVENTS_HOST}
+      - PG_EVENTS_DB=${PG_EVENTS_DB}
     command: bash -c 'cd /app && python app.py'
 
 networks:
   default:
     name: core-infra
     external: true
+

@@ -14,10 +14,8 @@ services:
       - HELIUM_NET_ID=${HELIUM_NET_ID}
       - HELIUM_OUI=${HELIUM_OUI}
       - HELIUM_MAX_COPIES=${HELIUM_MAX_COPIES}
-      # ChirpStack (Required)
-      - SERVER_HOST=${SERVER_HOST}
-      - SERVER_IP=${SERVER_IP}
       - ROUTE_ID=${ROUTE_ID}
+      # ChirpStack (Required)
       - CHIRPSTACK_SERVER=${CHIRPSTACK_SERVER}
       - CHIRPSTACK_APIKEY=${CHIRPSTACK_APIKEY}
       - REDIS_HOST=${REDIS_HOST}
