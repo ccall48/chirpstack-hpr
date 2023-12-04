@@ -12,30 +12,6 @@ import logging
 
 from ChirpHeliumCrypto import sync_device_euis, update_device_skfs
 
-#import nacl.bindings
-#from helium_py.crypto.keypair import Keypair
-#from helium_py.crypto.keypair import SodiumKeyPair
-#
-#from protos.helium import iot_config
-#from grpclib.client import Channel
-
-
-#host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
-#port = os.getenv("HELIUM_PORT", default=6080)
-#oui = int(os.getenv("HELIUM_OUI", default=None))
-#route_id = os.getenv('ROUTE_ID', None)
-#delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
-#
-#
-#with open(delegate_key, 'rb') as f:
-#    skey = f.read()[1:]
-#    delegate_keypair = Keypair(
-#        SodiumKeyPair(
-#            sk=skey,
-#            pk=nacl.bindings.crypto_sign_ed25519_sk_to_pk(skey)
-#        )
-#    )
-
 
 def my_logger(orig_func):
     logging.basicConfig(
@@ -159,35 +135,6 @@ class ChirpstackStreams:
             data = MessageToDict(resp)['deviceActivation']
         return data
 
-#    ###########################################################################
-#    # Helium gRPC API calls
-#    ###########################################################################
-#    @my_logger
-#    async def sync_device_euis(self, action, app_eui, dev_eui, route_id):
-#        app_eui = int(app_eui, 16)
-#        print('app_eui:', app_eui)
-#        dev_eui = int(dev_eui, 16)
-#        print('dev_eui:', dev_eui)
-#        async with Channel(host, port) as channel:
-#            service = iot_config.RouteStub(channel)
-#            req = iot_config.RouteUpdateEuisReqV1(
-#                action=iot_config.ActionV1(action),
-#                eui_pair=iot_config.EuiPairV1(
-#                    route_id=route_id,
-#                    app_eui=app_eui,
-#                    dev_eui=dev_eui
-#                ),
-#                timestamp=int(datetime.utcnow().timestamp()*1000),
-#                signer=delegate_keypair.address.bin
-#            )
-#            req.signature = delegate_keypair.sign(req.SerializeToString())
-#            resp = await service.update_euis([req])
-#        print(json.dumps(resp.to_dict(), indent=2))
-#        return
-
-    #async def sync_device_skfs(self, action: bool, dev_addr: str, nws_key: str, max_copies: int = 0):
-    #    pass
-
     ###########################################################################
     # follow internal redis stream gRPC for actionable changes
     ###########################################################################
@@ -251,8 +198,6 @@ class ChirpstackStreams:
         """.format(dev_eui, join_eui)
         self.db_transaction(query)
 
-        # cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} --commit'
-        #logging.info('add-device:', join_eui, dev_eui, self.route_id)
         await sync_device_euis(0, join_eui, dev_eui, self.route_id)
         return
 
@@ -285,9 +230,10 @@ class ChirpstackStreams:
         join_eui = data['join_eui']  # this should be a string
         action = 1
         # remove euis, device eui and join eui for device from router
-
         print('remove-device:', action, join_eui, dev_eui, self.route_id)
         await sync_device_euis(action, join_eui, dev_eui, self.route_id)
+
+        # add in remove device skfs here in lookup?
 
         # delete or disable device in helium_device table.
         delete_device = """
