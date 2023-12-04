@@ -10,29 +10,31 @@ from google.protobuf.json_format import MessageToJson, MessageToDict
 from chirpstack_api import api
 import logging
 
-import nacl.bindings
-from helium_py.crypto.keypair import Keypair
-from helium_py.crypto.keypair import SodiumKeyPair
+from ChirpHeliumCrypto import sync_device_euis, update_device_skfs
 
-from protos.helium import iot_config
-from grpclib.client import Channel
-
-
-host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
-port = os.getenv("HELIUM_PORT", default=6080)
-oui = int(os.getenv("HELIUM_OUI", default=None))
-route_id = os.getenv('ROUTE_ID', None)
-delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
+#import nacl.bindings
+#from helium_py.crypto.keypair import Keypair
+#from helium_py.crypto.keypair import SodiumKeyPair
+#
+#from protos.helium import iot_config
+#from grpclib.client import Channel
 
 
-with open(delegate_key, 'rb') as f:
-    skey = f.read()[1:]
-    delegate_keypair = Keypair(
-        SodiumKeyPair(
-            sk=skey,
-            pk=nacl.bindings.crypto_sign_ed25519_sk_to_pk(skey)
-        )
-    )
+#host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
+#port = os.getenv("HELIUM_PORT", default=6080)
+#oui = int(os.getenv("HELIUM_OUI", default=None))
+#route_id = os.getenv('ROUTE_ID', None)
+#delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
+#
+#
+#with open(delegate_key, 'rb') as f:
+#    skey = f.read()[1:]
+#    delegate_keypair = Keypair(
+#        SodiumKeyPair(
+#            sk=skey,
+#            pk=nacl.bindings.crypto_sign_ed25519_sk_to_pk(skey)
+#        )
+#    )
 
 
 def my_logger(orig_func):
@@ -157,31 +159,31 @@ class ChirpstackStreams:
             data = MessageToDict(resp)['deviceActivation']
         return data
 
-    ###########################################################################
-    # Helium gRPC API calls
-    ###########################################################################
-    @my_logger
-    async def sync_device_euis(self, action, app_eui, dev_eui, route_id):
-        app_eui = int(app_eui, 16)
-        print('app_eui:', app_eui)
-        dev_eui = int(dev_eui, 16)
-        print('dev_eui:', dev_eui)
-        async with Channel(host, port) as channel:
-            service = iot_config.RouteStub(channel)
-            req = iot_config.RouteUpdateEuisReqV1(
-                action=iot_config.ActionV1(action),
-                eui_pair=iot_config.EuiPairV1(
-                    route_id=route_id,
-                    app_eui=app_eui,
-                    dev_eui=dev_eui
-                ),
-                timestamp=int(datetime.utcnow().timestamp()*1000),
-                signer=delegate_keypair.address.bin
-            )
-            req.signature = delegate_keypair.sign(req.SerializeToString())
-            resp = await service.update_euis([req])
-        print(json.dumps(resp.to_dict(), indent=2))
-        return
+#    ###########################################################################
+#    # Helium gRPC API calls
+#    ###########################################################################
+#    @my_logger
+#    async def sync_device_euis(self, action, app_eui, dev_eui, route_id):
+#        app_eui = int(app_eui, 16)
+#        print('app_eui:', app_eui)
+#        dev_eui = int(dev_eui, 16)
+#        print('dev_eui:', dev_eui)
+#        async with Channel(host, port) as channel:
+#            service = iot_config.RouteStub(channel)
+#            req = iot_config.RouteUpdateEuisReqV1(
+#                action=iot_config.ActionV1(action),
+#                eui_pair=iot_config.EuiPairV1(
+#                    route_id=route_id,
+#                    app_eui=app_eui,
+#                    dev_eui=dev_eui
+#                ),
+#                timestamp=int(datetime.utcnow().timestamp()*1000),
+#                signer=delegate_keypair.address.bin
+#            )
+#            req.signature = delegate_keypair.sign(req.SerializeToString())
+#            resp = await service.update_euis([req])
+#        print(json.dumps(resp.to_dict(), indent=2))
+#        return
 
     #async def sync_device_skfs(self, action: bool, dev_addr: str, nws_key: str, max_copies: int = 0):
     #    pass
@@ -240,7 +242,7 @@ class ChirpstackStreams:
 
         device = data['dev_eui']
         dev_eui, join_eui = await self.get_device_request(device)
-        logging.info(f'Add Device EUIs: {dev_eui}, {join_eui}')
+        print(f'Add Device EUIs: {dev_eui}, {join_eui}')
 
         query = """
             INSERT INTO helium_devices (dev_eui, join_eui)
@@ -250,9 +252,8 @@ class ChirpstackStreams:
         self.db_transaction(query)
 
         # cmd = f'hpr route euis add -d {dev_eui} -a {join_eui} --route-id {self.route_id} --commit'
-
-        logging.info('add-device:', join_eui, dev_eui, self.route_id)
-        await self.sync_device_euis(0, join_eui, dev_eui, self.route_id)
+        #logging.info('add-device:', join_eui, dev_eui, self.route_id)
+        await sync_device_euis(0, join_eui, dev_eui, self.route_id)
         return
 
     @my_logger
@@ -267,7 +268,7 @@ class ChirpstackStreams:
             return
 
         device = data['dev_eui']
-        logging.info(f'Remove Device: {device}')
+        print(f'Remove Device: {device}')
 
         query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
         data = self.db_fetch(query)[0]
@@ -286,7 +287,8 @@ class ChirpstackStreams:
         # remove euis, device eui and join eui for device from router
 
         print('remove-device:', action, join_eui, dev_eui, self.route_id)
-        await self.sync_device_euis(action, join_eui, dev_eui, self.route_id)
+        await sync_device_euis(action, join_eui, dev_eui, self.route_id)
+
         # delete or disable device in helium_device table.
         delete_device = """
             DELETE FROM helium_devices WHERE dev_eui='{}';
@@ -323,34 +325,5 @@ class ChirpstackStreams:
             """.format(dev_eui)
             self.db_transaction(query)
         print('action', action, 'join', join_eui, 'dev', dev_eui)
-        await self.sync_device_euis(action, join_eui, dev_eui, self.route_id)
+        await sync_device_euis(action, join_eui, dev_eui, self.route_id)
         return
-
-
-#if __name__ == '__main__':
-#    route_id = os.getenv('ROUTE_ID')
-#    postgres_host = os.getenv('POSTGRES_HOST')
-#    postgres_user = os.getenv('POSTGRES_USER')
-#    postgres_pass = os.getenv('POSTGRES_PASS')
-#    postgres_name = os.getenv('POSTGRES_DB')
-#    postgres_port = os.getenv('POSTGRES_PORT', 5432)
-#    postgres_ssl_mode = os.getenv('POSTGRES_SSL_MODE', 'allow')
-#    chirpstack_host = os.getenv('CHIRPSTACK_SERVER')
-#    chirpstack_token = os.getenv('CHIRPSTACK_APIKEY')
-#
-#    client_streams = ChirpstackStreams(
-#        route_id=route_id,
-#        postgres_host=postgres_host,
-#        postgres_user=postgres_user,
-#        postgres_pass=postgres_pass,
-#        postgres_name=postgres_name,
-#        postgres_port=postgres_port,
-#        postgres_ssl_mode=postgres_ssl_mode,
-#        chirpstack_host=chirpstack_host,
-#        chirpstack_token=chirpstack_token,
-#    )
-#
-#    asyncio.run(
-#        client_streams.api_stream_requests()
-#    )
-#

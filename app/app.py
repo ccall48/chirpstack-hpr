@@ -104,5 +104,3 @@ if __name__ == '__main__':
         executor.submit(tenant.stream_meta)
         executor.submit(run_every, update_device_status, device_int)
         executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
-
-# ChirpDeviceKeys.helium_skfs_update
