@@ -1,7 +1,5 @@
 import os
 from functools import wraps
-import json
-from datetime import datetime
 import psycopg2
 import psycopg2.extras
 import redis.asyncio as redis
@@ -10,7 +8,7 @@ from google.protobuf.json_format import MessageToJson, MessageToDict
 from chirpstack_api import api
 import logging
 
-from ChirpHeliumCrypto import sync_device_euis, update_device_skfs
+from ChirpHeliumCrypto import sync_device_euis
 
 
 def my_logger(orig_func):
@@ -217,14 +215,6 @@ class ChirpstackStreams:
 
         query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
         data = self.db_fetch(query)[0]
-
-        #if data['dev_addr'] is not None:
-        #    dev_addr = data['dev_addr']  # this should be a string
-        #    nws_key = data['nws_key']    # this should be a string
-        #    # if set remove dev_addr and nws_key from skfs's
-        #    rm_skfs = f'hpr route skfs remove -r {self.route_id} -d {dev_addr} -s {nws_key} -c'
-        #    self.config_service_cli(rm_skfs)
-        #    print(f'Removing SKFS -> {rm_skfs}')
 
         dev_eui = data['dev_eui']    # this should be a string
         join_eui = data['join_eui']  # this should be a string
