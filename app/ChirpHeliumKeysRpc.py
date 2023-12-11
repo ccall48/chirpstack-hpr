@@ -170,10 +170,23 @@ class ChirpDeviceKeys:
 
         skfs_list = await get_route_skfs()
 
-        # logging.info(f"SKFS List: {skfs_list}")
-        # logging.info(f"All Helium Devices: {all_helium_devices}")
+        logging.info(f"SKFS List: {skfs_list}")
+        logging.info(f"All Helium Devices: {all_helium_devices}")
 
         # Convert the lists to sets for efficient set operations
+        # compare dev_addr & session_key for match else remove
+        all_helium_sessions_set = {
+            (d["dev_addr"], d["nws_key"]) for d in all_helium_devices
+        }
+
+        all_skfs_sessions_set = {
+            (d["devaddr"], d["sessionKey"]) for d in skfs_list
+        }
+
+        devices_to_remove = all_helium_sessions_set ^ all_skfs_sessions_set
+
+        # only update max_copies if changed, do not remove and re add if only max copies changes
+        # as it seems to make the session key hang and not pass data.
         all_helium_devices_set = {
             (d["dev_addr"], d["nws_key"], d["max_copies"])
             for d in all_helium_devices
@@ -184,18 +197,16 @@ class ChirpDeviceKeys:
             for d in skfs_list
         }
 
-        # logging.info(f"SKFS List Set: {skfs_list_set}")
-        # logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
+        logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
+        logging.info(f"SKFS List Set: {skfs_list_set}")
 
-        # Devices to remove from skfs_list
-        devices_to_remove = skfs_list_set - all_helium_devices_set
         # Devices to add to skfs_list
         devices_to_add = all_helium_devices_set - skfs_list_set
 
         logging.info(f"Devices_to_remove: {devices_to_remove}")
         logging.info(f"Devices_to_add: {devices_to_add}")
 
-        # with rpc we can make update a max of 100 skfs in one request
+        # with rpc we can make update to a max of 100 skfs in one request
         rm_skfs = []
         add_skfs = []
 
@@ -204,11 +215,10 @@ class ChirpDeviceKeys:
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
                     devaddr=int(dev_addr, 16),
                     session_key=nws_key,
-                    action=iot_config.ActionV1(1),
-                    max_copies=max_copies
-                ) for dev_addr, nws_key, max_copies in devices_to_remove
+                    action=iot_config.ActionV1(1)
+                ) for dev_addr, nws_key in devices_to_remove
             ]
-            # loging.info(f'RM-SKFS: {rm_skfs}')
+            logging.info(f'RM-SKFS: {rm_skfs}')
 
         if devices_to_add:
             add_skfs = [
@@ -219,12 +229,12 @@ class ChirpDeviceKeys:
                     max_copies=max_copies
                 ) for dev_addr, nws_key, max_copies in devices_to_add
             ]
-            # loging.info(f'ADD-SKFS: {add_skfs}')
+            logging.info(f'ADD-SKFS: {add_skfs}')
 
         skfs_action = rm_skfs + add_skfs
 
         if skfs_action:
-            """Chunk updates to max size of 100 requests at a time"""
+            """Chunk updates max of 100 requests at a time, helium rpc restriction"""
             for group in self.chunker(skfs_action, 100):
                 logging.info(f'Chunked_Update: {group}')
                 skfs_update_chunk = await update_device_skfs(self.route_id, group)
