@@ -20,7 +20,7 @@ click==8.1.7
 frozenlist==1.4.0
 google-api-core==2.11.1
 google-auth==2.24.0
-googleapis-common-protos==1.60.0
+googleapis-common-protos==1.62.0
 grpcio==1.59.3
 grpcio-tools==1.56.0
 grpclib==0.4.6
