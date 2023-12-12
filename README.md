@@ -17,12 +17,14 @@ max packets per skfs are set to 0 by default and updated on activation. if not s
 ## Initial Helium Setup
 - [Helium Roaming Quickstart](https://docs.helium.com/iot/lorawan-roaming/#roaming-quickstart)
 
-# TODO:
-1. get python working with helium-crypto.rs and helium/proto to make changes directly over the wire, I'm currently
-unable to get this function working correctly on the helium side. Any help here would be appreciated if someone has
-some time to donate towards the project.
+## TODO:
+1. possibly migrate sql to more friendly pythonic sqlalchemy ORM.
 
-2. Migrate sql to more friendly pythonic sqlalchemy ORM.
+## Completed
+1. get python working with helium-crypto.rs and helium/proto to make changes directly over the wire.
+thanks to groot for getting the inital rpc working for signing changes [helium-iot-config-py](https://github.com/mawdegroot/helium-iot-config-py)
+
+2. external integrations to account for by device and by tenant dc usage. currently supports aws sqs & postgres.
 
 ## Create chirpstack integration database.
 - This step is no longer required, a sepreate table will be created in the regular postgres db to keep a synced record of
