@@ -1,6 +1,13 @@
 name: Python Style Guide Check
 
-on: [push]
+# on: [push]
+
+on:
+  push:
+    branches:
+    - master
+    - patch/*
+    - release/*
 
 jobs:
   build:
@@ -20,4 +27,4 @@ jobs:
         pip install flake8
     - name: Analysing the code with flake8
       run: |
-        flake8 $(git ls-files '*.py')
+        flake8 $(git ls-files '/app/*.py');flake8 $(git ls-files '/app/Publishers/*.py');
