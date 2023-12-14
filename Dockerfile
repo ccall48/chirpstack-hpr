@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
-COPY bin/helium-config-service-cli /usr/local/bin/hpr
+# COPY bin/helium-config-service-cli /usr/local/bin/hpr
 COPY app/* .
 COPY requirements.txt .
 RUN pip install -r requirements.txt
