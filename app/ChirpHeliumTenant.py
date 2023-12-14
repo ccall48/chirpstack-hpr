@@ -5,6 +5,7 @@ import redis
 from math import ceil
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import meta
+import logging
 from UsagePublisher import publish_usage_event
 
 # -----------------------------------------------------------------------------
@@ -17,16 +18,16 @@ rdb = redis.Redis(connection_pool=rpool, decode_responses=True)
 
 class ChirpstackTenant:
     def __init__(
-            self,
-            route_id: str,
-            postgres_host: str,
-            postgres_user: str,
-            postgres_pass: str,
-            postgres_name: str,
-            postgres_port: str,
-            postgres_ssl_mode: str,
-            chirpstack_host: str,
-            chirpstack_token: str,
+        self,
+        route_id: str,
+        postgres_host: str,
+        postgres_user: str,
+        postgres_pass: str,
+        postgres_name: str,
+        postgres_port: str,
+        postgres_ssl_mode: str,
+        chirpstack_host: str,
+        chirpstack_token: str,
     ):
         self.route_id = route_id
         self.pg_host = postgres_host
@@ -81,7 +82,7 @@ class ChirpstackTenant:
         dupes = len(data['rxInfo'])
         dc = ceil(data['phyPayloadByteCount'] / 24)
         total_dc = dupes * dc
-        print(f'dev_eui: {dev_eui} | MSG DC {dc} | Dupes: {dupes} | Total DC: {total_dc}')
+        logging.info(f"dev_eui: {dev_eui} | MSG DC {dc} | Dupes: {dupes} | Total DC: {total_dc}")
         query = """
             UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
         """.format(total_dc, dev_eui)

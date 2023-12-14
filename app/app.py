@@ -1,9 +1,12 @@
 import os
-import time
+import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
-from ChirpHeliumRequests import ChirpstackStreams
-from ChirpHeliumKeys import ChirpDeviceKeys
+# from ChirpHeliumRequests import ChirpstackStreams
+from ChirpHeliumRequestsRpc import ChirpstackStreams
+# from ChirpHeliumKeys import ChirpDeviceKeys
+from ChirpHeliumKeysRpc import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
 
 
@@ -70,18 +73,34 @@ if __name__ == '__main__':
                 print(f'{name} Error: {err}')
                 pass
 
+    def async_run_every(fn: str, interval: int):
+        name = str(fn)
+        while True:
+            try:
+                start = time.time()
+                print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
+                asyncio.run(fn())
+                stop = time.time()
+                time.sleep(interval - (stop - start))
+            except Exception as err:
+                print(f'{name} Error: {err}')
+                pass
+
+    def async_wrapper(corro):
+        return asyncio.run(corro())
+
     def update_device_status():
         updates = list(map(client_keys.get_merged_keys, client_keys.fetch_all_devices()))
         print('\n'.join(updates))
         return
 
-    skfs_interval = 60 * 10   # 10 minutes
-    device_interval = 60 * 5  # 5 minutes
+    skfs_int = 60 * 5   # 5 minutes
+    device_int = 60 * 5  # 5 minutes
 
     client_streams.create_tables()
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        executor.submit(client_streams.api_stream_requests)
+        executor.submit(async_wrapper, client_streams.api_stream_requests)
         executor.submit(tenant.stream_meta)
-        executor.submit(run_every, client_keys.helium_skfs_update, skfs_interval)
-        executor.submit(run_every, update_device_status, device_interval)
+        executor.submit(run_every, update_device_status, device_int)
+        executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
