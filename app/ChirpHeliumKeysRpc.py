@@ -1,4 +1,5 @@
 from functools import wraps
+# import asyncpg
 import psycopg2
 import psycopg2.extras
 import grpc
@@ -8,6 +9,7 @@ import logging
 
 from ChirpHeliumCrypto import get_route_skfs, update_device_skfs
 from protos.helium import iot_config
+from DatabasePool import Database
 
 
 def my_logger(orig_func):
@@ -62,10 +64,29 @@ class ChirpDeviceKeys:
                 cur.execute(query)
                 return cur.fetchall()
 
+    async def async_db_fetch(self, query: str):
+        db = Database()
+        await db.connect()
+        assert db.pool
+
+        async with db.pool.acquire() as conn:
+            async with conn.transaction():
+                cur = await conn.fetch(query)
+        await db.close()
+        return cur
+
     def db_transaction(self, query: str):
         with psycopg2.connect(self.postgres) as con:
             with con.cursor() as cur:
                 cur.execute(query)
+
+    async def async_db_transaction(self, query: str):
+        db = Database()
+        await db.connect()
+        assert db.pool
+        async with db.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(query)
 
     def fetch_all_devices(self) -> list[str]:
         with psycopg2.connect(self.postgres) as con:
@@ -152,6 +173,7 @@ class ChirpDeviceKeys:
             devices["nFCntDown"],
         )
         self.db_transaction(query)
+        # await self.async_db_transaction(query)
         return f"Updated: {dev_eui}"
 
     @my_logger
@@ -166,12 +188,12 @@ class ChirpDeviceKeys:
             WHERE is_disabled=false
             AND dev_addr != '';
         """
-        all_helium_devices = self.db_fetch(helium_devices)
+        # all_helium_devices = self.db_fetch(helium_devices)
+        all_helium_devices = await self.async_db_fetch(helium_devices)
+        logging.info(f"All Helium Devices: {all_helium_devices}")
 
         skfs_list = await get_route_skfs()
-
         logging.info(f"SKFS List: {skfs_list}")
-        logging.info(f"All Helium Devices: {all_helium_devices}")
 
         # Convert the lists to sets for efficient set operations
         # compare dev_addr & session_key for match else remove
@@ -184,6 +206,7 @@ class ChirpDeviceKeys:
         }
 
         devices_to_remove = all_helium_sessions_set ^ all_skfs_sessions_set
+        logging.info(f"Devices_to_remove: {devices_to_remove}")
 
         # only update max_copies if changed, do not remove and re add if only max copies changes
         # as it seems to make the session key hang and not pass data.
@@ -197,13 +220,11 @@ class ChirpDeviceKeys:
             for d in skfs_list
         }
 
-        logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
-        logging.info(f"SKFS List Set: {skfs_list_set}")
+        # logging.info(f"All Helium Devices Set: {all_helium_devices_set}")
+        # logging.info(f"SKFS List Set: {skfs_list_set}")
 
         # Devices to add to skfs_list
         devices_to_add = all_helium_devices_set - skfs_list_set
-
-        logging.info(f"Devices_to_remove: {devices_to_remove}")
         logging.info(f"Devices_to_add: {devices_to_add}")
 
         # with rpc we can make update to a max of 100 skfs in one request
