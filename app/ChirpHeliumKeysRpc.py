@@ -106,7 +106,7 @@ class ChirpDeviceKeys:
     ###########################################################################
     # Chirpstack gRPC API calls
     ###########################################################################
-    @my_logger
+    # @my_logger
     def get_device(self, dev_eui: str) -> dict[str]:
         with grpc.insecure_channel(self.cs_gprc) as channel:
             client = api.DeviceServiceStub(channel)
@@ -116,7 +116,7 @@ class ChirpDeviceKeys:
             data = MessageToDict(resp)["device"]
         return data
 
-    @my_logger
+    # @my_logger
     def get_device_activation(self, dev_eui: str) -> dict[str]:
         with grpc.insecure_channel(self.cs_gprc) as channel:
             client = api.DeviceServiceStub(channel)
@@ -128,7 +128,7 @@ class ChirpDeviceKeys:
                 return data["deviceActivation"]
         return data
 
-    @my_logger
+    # @my_logger
     def get_merged_keys(self, dev_eui: str) -> dict[str]:
         devices = {
             "devAddr": "",
@@ -176,7 +176,7 @@ class ChirpDeviceKeys:
         # await self.async_db_transaction(query)
         return f"Updated: {dev_eui}"
 
-    @my_logger
+    # @my_logger
     async def helium_skfs_update(self):
         """
         TODO:
@@ -190,10 +190,10 @@ class ChirpDeviceKeys:
         """
         # all_helium_devices = self.db_fetch(helium_devices)
         all_helium_devices = await self.async_db_fetch(helium_devices)
-        logging.info(f"All Helium Devices: {all_helium_devices}")
+        # logging.info(f"All Helium Devices: {all_helium_devices}")
 
         skfs_list = await get_route_skfs()
-        logging.info(f"SKFS List: {skfs_list}")
+        # logging.info(f"SKFS List: {skfs_list}")
 
         # Convert the lists to sets for efficient set operations
         # compare dev_addr & session_key for match else remove
@@ -239,7 +239,7 @@ class ChirpDeviceKeys:
                     action=iot_config.ActionV1(1)
                 ) for dev_addr, nws_key in devices_to_remove
             ]
-            logging.info(f'RM-SKFS: {rm_skfs}')
+            # logging.info(f'RM-SKFS: {rm_skfs}')
 
         if devices_to_add:
             add_skfs = [
@@ -250,7 +250,7 @@ class ChirpDeviceKeys:
                     max_copies=max_copies
                 ) for dev_addr, nws_key, max_copies in devices_to_add
             ]
-            logging.info(f'ADD-SKFS: {add_skfs}')
+            # logging.info(f'ADD-SKFS: {add_skfs}')
 
         skfs_action = rm_skfs + add_skfs
 
