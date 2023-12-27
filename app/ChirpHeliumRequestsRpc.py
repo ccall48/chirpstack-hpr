@@ -5,7 +5,7 @@ import psycopg2.extras
 import redis.asyncio as redis
 import grpc
 from google.protobuf.json_format import MessageToJson, MessageToDict
-from chirpstack_api import stream
+from chirpstack_api import api, stream
 import logging
 
 from ChirpHeliumCrypto import sync_device_euis
@@ -246,6 +246,7 @@ class ChirpstackStreams:
 
         device = data['dev_eui']
         is_disabled = data['is_disabled']
+
         dev_eui, join_eui = await self.get_device_request(device)
         if is_disabled == 'true':
             action = 1
