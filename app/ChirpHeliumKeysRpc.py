@@ -12,22 +12,22 @@ from protos.helium import iot_config
 from DatabasePool import Database
 
 
-def my_logger(orig_func):
-    logging.basicConfig(
-        filename='chirpstack-hpr.log',
-        filemode='a',
-        format='%(asctime)s %(levelname)s:%(name)s:%(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S',
-    )
-    logging.getLogger("asyncio").setLevel(logging.INFO)
-
-    @wraps(orig_func)
-    def wrapper(*args, **kwargs):
-        logging.info(
-            f'Passed args: {args}, kwargs: {kwargs}')
-        return orig_func(*args, **kwargs)
-    return wrapper
+# def my_logger(orig_func):
+#     logging.basicConfig(
+#         filename='chirpstack-hpr.log',
+#         filemode='a',
+#         format='%(asctime)s %(levelname)s:%(name)s:%(message)s',
+#         level=logging.INFO,
+#         datefmt='%Y-%m-%d %H:%M:%S',
+#     )
+#     logging.getLogger("asyncio").setLevel(logging.INFO)
+#
+#     @wraps(orig_func)
+#     def wrapper(*args, **kwargs):
+#         logging.info(
+#             f'Passed args: {args}, kwargs: {kwargs}')
+#         return orig_func(*args, **kwargs)
+#     return wrapper
 
 
 class ChirpDeviceKeys:
@@ -193,6 +193,8 @@ class ChirpDeviceKeys:
         # logging.info(f"All Helium Devices: {all_helium_devices}")
 
         skfs_list = await get_route_skfs()
+
+        # logging.info(f"All Helium Devices: {all_helium_devices}")
         # logging.info(f"SKFS List: {skfs_list}")
 
         # Convert the lists to sets for efficient set operations
