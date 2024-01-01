@@ -5,7 +5,7 @@ import psycopg2.extras
 import redis.asyncio as redis
 import grpc
 from google.protobuf.json_format import MessageToJson, MessageToDict
-from chirpstack_api import api
+from chirpstack_api import api, stream
 import logging
 
 from ChirpHeliumCrypto import sync_device_euis
@@ -148,7 +148,7 @@ class ChirpstackStreams:
 
                     if b'request' in message[1]:
                         msg = message[1][b'request']
-                        pl = api.request_log_pb2.RequestLog()
+                        pl = stream.api_request_pb2.ApiRequestLog()
                         pl.ParseFromString(msg)
                         req = MessageToDict(pl)
                         if 'method' not in req.keys():
@@ -175,7 +175,7 @@ class ChirpstackStreams:
                 logging.info(f'api_stream_requests: {err}')
                 pass
 
-    @my_logger
+    # @my_logger
     async def add_device_euis(self, data: dict):
         """
         On device being added using chirpstack webui or api
@@ -246,6 +246,7 @@ class ChirpstackStreams:
 
         device = data['dev_eui']
         is_disabled = data['is_disabled']
+
         dev_eui, join_eui = await self.get_device_request(device)
         if is_disabled == 'true':
             action = 1

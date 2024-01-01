@@ -80,7 +80,16 @@ class ChirpstackTenant:
     def meta_up(self, data: dict):
         dev_eui = data['devEui']
         dupes = len(data['rxInfo'])
-        dc = ceil(data['phyPayloadByteCount'] / 24)
+        # dc = ceil(data['phyPayloadByteCount'] / 24)
+        if 'applicationPayloadByteCount' not in data.keys():
+            # if an empty msg is sent by a device it doesnt pass this key.
+            print('********** applicationPayloadByteCount **********')
+            print(data)
+            dc = ceil(data['phyPayloadByteCount'] / 24)
+            print('**********    **********  *********    **********')
+        else:
+            dc = ceil(data['applicationPayloadByteCount'] / 24)
+
         total_dc = dupes * dc
         logging.info(f"dev_eui: {dev_eui} | MSG DC {dc} | Dupes: {dupes} | Total DC: {total_dc}")
         query = """
@@ -102,5 +111,4 @@ class ChirpstackTenant:
                 tenant_id = row['tenant_id']
                 application_id = row['id']
             publish_usage_event(dev_eui, tenant_id, application_id, total_dc)
-
         return

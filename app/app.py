@@ -3,11 +3,10 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-# from ChirpHeliumRequests import ChirpstackStreams
 from ChirpHeliumRequestsRpc import ChirpstackStreams
-# from ChirpHeliumKeys import ChirpDeviceKeys
 from ChirpHeliumKeysRpc import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
+from ChirpHeliumJoinRpc import ChirpstackJoins
 
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +22,18 @@ if __name__ == '__main__':
     postgres_ssl_mode = os.getenv('POSTGRES_SSL_MODE', 'allow')
     chirpstack_host = os.getenv('CHIRPSTACK_SERVER')
     chirpstack_token = os.getenv('CHIRPSTACK_APIKEY')
+
+    events = ChirpstackJoins(
+        route_id=route_id,
+        postgres_host=postgres_host,
+        postgres_user=postgres_user,
+        postgres_pass=postgres_pass,
+        postgres_name=postgres_name,
+        postgres_port=postgres_port,
+        postgres_ssl_mode=postgres_ssl_mode,
+        chirpstack_host=chirpstack_host,
+        chirpstack_token=chirpstack_token,
+    )
 
     client_streams = ChirpstackStreams(
         route_id=route_id,
@@ -99,8 +110,9 @@ if __name__ == '__main__':
 
     client_streams.create_tables()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         executor.submit(async_wrapper, client_streams.api_stream_requests)
+        executor.submit(async_wrapper, events.device_stream_event)
         executor.submit(tenant.stream_meta)
         executor.submit(run_every, update_device_status, device_int)
         executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
