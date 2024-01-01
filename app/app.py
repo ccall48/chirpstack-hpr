@@ -3,9 +3,7 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-# from ChirpHeliumRequests import ChirpstackStreams
 from ChirpHeliumRequestsRpc import ChirpstackStreams
-# from ChirpHeliumKeys import ChirpDeviceKeys
 from ChirpHeliumKeysRpc import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
 from ChirpHeliumJoinRpc import ChirpstackJoins
@@ -27,8 +25,14 @@ if __name__ == '__main__':
 
     events = ChirpstackJoins(
         route_id=route_id,
+        postgres_host=postgres_host,
+        postgres_user=postgres_user,
+        postgres_pass=postgres_pass,
+        postgres_name=postgres_name,
+        postgres_port=postgres_port,
+        postgres_ssl_mode=postgres_ssl_mode,
         chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token
+        chirpstack_token=chirpstack_token,
     )
 
     client_streams = ChirpstackStreams(
