@@ -11,6 +11,9 @@ from helium_py.crypto.keypair import SodiumKeyPair
 from protos.helium import iot_config
 from grpclib.client import Channel
 
+# precision for signing rpc's moving from milliseconds to seconds in next iot config update
+# quick helper function to switch it over quickly when updated.
+PRECISION = 'ms'
 
 host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
 port = int(os.getenv("HELIUM_PORT", default=6080))
@@ -45,6 +48,13 @@ def my_logger(orig_func):
         return orig_func(*args, **kwargs)
     return wrapper
 
+
+def rpc_time(precision: str = None):
+    if precision == 'ms':
+        return int(datetime.utcnow().timestamp()*1000)
+    return int(datetime.utcnow().timestamp())
+
+
 ###########################################################################
 # Helium gRPC API calls
 ###########################################################################
@@ -62,7 +72,7 @@ async def sync_device_euis(action: bool, app_eui: str, dev_eui: str, route_id: s
                 app_eui=app_eui,
                 dev_eui=dev_eui
             ),
-            timestamp=int(datetime.utcnow().timestamp()*1000),
+            timestamp=rpc_time(PRECISION),
             signer=delegate_keypair.address.bin
         )
         req.signature = delegate_keypair.sign(req.SerializeToString())
@@ -77,7 +87,7 @@ async def get_route_skfs() -> list[dict]:
         service = iot_config.RouteStub(channel)
         req = iot_config.RouteSkfListReqV1(
             route_id=route_id,
-            timestamp=int(datetime.utcnow().timestamp()*1000),
+            timestamp=rpc_time(PRECISION),
             signer=delegate_keypair.address.bin
         )
         req.signature = delegate_keypair.sign(req.SerializeToString())
@@ -110,7 +120,7 @@ async def update_device_skfs(route_id: str, skfs_action: list):
         req = iot_config.RouteSkfUpdateReqV1(
             route_id=route_id,
             updates=skfs_action,
-            timestamp=int(datetime.utcnow().timestamp()*1000),
+            timestamp=rpc_time(PRECISION),
             signer=delegate_keypair.address.bin
         )
         req.signature = delegate_keypair.sign(req.SerializeToString())
