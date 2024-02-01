@@ -32,6 +32,11 @@ def publish_usage_event(dev_eui, tenant_id, application_id, dc_used):
             info_log("Publishing usage event to PG: %s" % usage_event)
             publish_to_pg(usage_event)
 
+        case 'HTTP':
+            from Publishers.HttpUsagePublisher import publish_to_http
+            info_log("Publishing usage event to HTTP: %s" % usage_event)
+            publish_to_http(usage_event)
+
         case _:
             info_log("Provider %s not found" % provider)
             return
