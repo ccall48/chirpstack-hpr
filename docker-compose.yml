@@ -44,5 +44,5 @@ services:
 
 networks:
   default:
-    name: core-infra
-    external: true
+    external: 
+      name: core-infra
