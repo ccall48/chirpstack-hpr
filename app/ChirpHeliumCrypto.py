@@ -13,7 +13,7 @@ from grpclib.client import Channel
 
 # precision for signing rpc's moving from milliseconds to seconds in next iot config update
 # quick helper function to switch it over quickly when updated.
-PRECISION = 'ms'
+PRECISION = 's'
 
 host = os.getenv("HELIUM_HOST", default="mainnet-config.helium.io")
 port = int(os.getenv("HELIUM_PORT", default=6080))
@@ -52,7 +52,8 @@ def my_logger(orig_func):
 def rpc_time(precision: str = None):
     if precision == 'ms':
         return int(datetime.utcnow().timestamp()*1000)
-    return int(datetime.utcnow().timestamp())
+    elif precision == 's':
+        return int(datetime.utcnow().timestamp())
 
 
 ###########################################################################
