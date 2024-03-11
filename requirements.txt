@@ -21,7 +21,7 @@ google-api-core==2.11.1
 google-auth==2.24.0
 googleapis-common-protos==1.62.0
 grpcio==1.59.3
-grpcio-tools==1.56.0
+grpcio-tools==1.62.1
 grpclib==0.4.6
 h2==4.1.0
 helium-py==0.2a2
