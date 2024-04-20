@@ -97,7 +97,7 @@ class ChirpstackTenant:
         """.format(total_dc, dev_eui)
         self.db_transaction(query)
 
-        if os.getenv('PUBLISH_USAGE_EVENTS'):
+        if os.getenv('PUBLISH_USAGE_EVENTS') == 'True':
             # First we get the tenant id for the device...
             query = """
                 SELECT application.tenant_id, application.id FROM application
