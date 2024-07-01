@@ -4,7 +4,7 @@ import psycopg2.extras
 import redis
 from math import ceil
 from google.protobuf.json_format import MessageToDict
-from chirpstack_api import meta
+from chirpstack_api import stream
 import logging
 from UsagePublisher import publish_usage_event
 
@@ -67,7 +67,7 @@ class ChirpstackTenant:
 
                     if b"up" in message[1]:
                         b = message[1][b"up"]
-                        pl = meta.meta_pb2.UplinkMeta()
+                        pl = stream.meta_pb2.UplinkMeta()
                         pl.ParseFromString(b)
                         data = MessageToDict(pl)
                         self.meta_up(data)
