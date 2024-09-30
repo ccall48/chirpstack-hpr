@@ -22,7 +22,11 @@ google-api-core==2.19.1
 google-auth==2.24.0
 googleapis-common-protos==1.62.0
 greenlet==3.0.3
+<<<<<<< HEAD
 grpcio==1.66.2
+=======
+grpcio==1.64.1
+>>>>>>> a28e0311f4050953572c711ed15814c319824ad6
 grpclib==0.4.7
 h2==4.1.0
 helium-py==0.2a2
@@ -39,7 +43,11 @@ packaging==23.2
 pathspec==0.11.2
 platformdirs==4.0.0
 proto-plus==1.24.0
+<<<<<<< HEAD
 protobuf==4.25.3
+=======
+protobuf
+>>>>>>> a28e0311f4050953572c711ed15814c319824ad6
 psycopg2-binary==2.9.6
 pyasn1==0.5.0
 pyasn1-modules==0.3.0
