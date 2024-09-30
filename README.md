@@ -28,8 +28,9 @@ if you find this useful give us a star or clone the repo and contribute.
 - `docker compose up` should pull the current container from gh and start the container check for any errors. if you need to change things its usually best to recreate the containers `ctrl-c` to terminate current running container and disgard with `docker compose down --remove-orphans` make and save any changes as needed. once you have it right start docker in detached mode `docker compose up -d`
 
 
-## TODO:
-1. possibly migrate sql to more friendly pythonic sqlalchemy ORM.
+If you found this helpful share a tip.<br />
+`solana:` `GKunRFVcfMem7oS5Yd3WV1Tm48jZoCFME8fbMMdprWS4`
+
 
 ## Completed
 1. get python working with helium-crypto.rs and helium/proto to make changes directly over the wire.
@@ -37,7 +38,12 @@ thanks to groot for getting the inital rpc working for signing changes [helium-i
 
 2. external integrations to account for by device and by tenant dc usage. currently supports aws sqs, postgres and http (using rpc).
 
-## Create chirpstack integration database.
+## TODO:
+1. possibly migrate sql to more friendly pythonic sqlalchemy ORM.
+
+<hr>
+
+## Depreciated Create chirpstack integration database.
 - This step is no longer required, a sepreate table will be created in the regular postgres db to keep a synced record of
 the helium devices.
 
