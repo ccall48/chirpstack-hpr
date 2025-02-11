@@ -1,0 +1,18 @@
+aiosqlite
+# asyncpg
+base58
+betterproto
+chirpstack_api
+googleapis-common-protos
+grpcio
+grpclib
+helium_py
+# orjson
+protobuf
+pydantic
+pydantic-extra-types
+PyNaCl
+python-dotenv
+redis
+# SQLAlchemy
+xxhash
