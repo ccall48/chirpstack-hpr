@@ -1,5 +1,9 @@
 # Chirpstack-hpr (Chirpstack -> Helium Packet Router).
 <p>
+NB: if you're upgrading from chirpstack version 4.7 or less first disable this connector until you run the manual command required to migrate the session keys from redis to postgresql. otherwise if a sync occurs before you do this your device session keys maybe removed from the helium packet router.<br />
+latest test working version v4.11.0
+</p>
+<p>
 this project aims to be a simple container to leverage the helium packet config cli using python to interface between chirpstack v4 and the helium packet router cli. it's main focus is to replicate actions taken in Chirpstack v4 by a tenant to add/update/remove device euis to the helium packet router when a device is actioned on by a tenant.</p>
 <p>
 you will need to make sure this container connects to the same docker network or network as your chirpstack container is running on so that it can interact with it when changes are made.
@@ -41,6 +45,7 @@ thanks to groot for getting the inital rpc working for signing changes [helium-i
 ## TODO:
 1. possibly migrate sql to more friendly pythonic sqlalchemy ORM.
 
+<!--
 <hr>
 
 ## Depreciated Create chirpstack integration database.
@@ -67,3 +72,4 @@ create database helium_integration with owner helium_integration;
 -- exit psql
 \q
 ```
+-->
