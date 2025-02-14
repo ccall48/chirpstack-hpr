@@ -10,15 +10,22 @@ class DeviceDatabase:
         async with aiosqlite.connect(self.DATABASE) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS devices (
-                devEui TEXT PRIMARY KEY,
-                name TEXT,
-                isDisabled TEXT NOT NULL,
-                variables TEXT,
-                tags TEXT,
-                joinEui TEXT NOT NULL,
-                devAddr TEXT NOT NULL,
-                appSKey TEXT,
-                nwkSEncKey TEXT
+                    devEui TEXT PRIMARY KEY,
+                    name TEXT,
+                    isDisabled TEXT NOT NULL,
+                    variables TEXT,
+                    tags TEXT,
+                    joinEui TEXT NOT NULL,
+                    devAddr TEXT NOT NULL,
+                    appSKey TEXT,
+                    nwkSEncKey TEXT
+            )""")
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS data_credits (
+                    tenantId TEXT PRIMARY KEY,
+                    tenantName TEXT,
+                    dc_balance INT,
+                    dc_used INT
             )""")
 
     async def upsert_device(self, kwargs):
@@ -51,6 +58,22 @@ class DeviceDatabase:
             ))
             await db.commit()
 
+    async def upsert_data_credits(self, tenantId, tenantName, dc_used):
+        async with aiosqlite.connect(self.DATABASE) as db:
+            sql = """
+                INSERT INTO data_credits
+                (tenantId, tenantName, dc_used)
+                VALUES (?, ?, ?)
+                ON CONFLICT(tenantId) DO UPDATE
+                SET tenantName=EXCLUDED.tenantName,
+                    dc_used = dc_used + EXCLUDED.dc_used
+            """
+            await db.execute(sql, (
+                tenantId,
+                tenantName,
+                dc_used,
+            ))
+            await db.commit()
 
 """
 devEui=3240324265253275232
