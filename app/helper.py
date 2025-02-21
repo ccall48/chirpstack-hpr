@@ -1,3 +1,4 @@
+import time
 from math import ceil
 
 
@@ -10,3 +11,7 @@ def data_bytes_size(b64string: str) -> int:
     if dc == 0:
         return 1
     return dc
+
+
+def get_time():
+    return int(time.time())

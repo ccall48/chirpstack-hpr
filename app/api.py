@@ -66,6 +66,8 @@ async def get_device_data(dev_eui: str) -> dict:
         b = MessageToDict(await client.GetActivation(req, metadata=AUTH_TOKEN), True)
         if b.get('deviceActivation'):
             b = b['deviceActivation']
+            c = MessageToDict(await client.GetKeys(req, metadata=AUTH_TOKEN), True)['deviceKeys']
+            return a | b | c
     return a | b
 
 

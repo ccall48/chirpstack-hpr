@@ -38,16 +38,19 @@ class GetVariables(TypedDict, total=False):
 
 
 class GetDeviceSyncRequest(BaseModel):
+    # # get device
     devEui: str
     name: str
     isDisabled: bool
     variables: GetVariables[Dict]
     tags: Optional[Dict[str, str]] = {}
     joinEui: str
-    # # activated device portion
+    # # deviceActivated device portion
     devAddr: Optional[str] = Field(default=0)
     appSKey: Optional[str] = Field(default=0)
     nwkSEncKey: Optional[str] = Field(default=0)
+    # # deviceKeys portion
+    nwkKey: Optional[str] = Field(default=0)
 
     @field_validator('devEui', 'joinEui', 'devAddr')
     def eui_hex_value_check(cls, v):

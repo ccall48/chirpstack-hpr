@@ -1,6 +1,7 @@
 import os
 import asyncio
 import time
+import time
 import json
 import redis.asyncio as redis
 import grpc
@@ -9,10 +10,11 @@ from chirpstack_api import api, integration, stream
 from dotenv import load_dotenv
 
 from models import DeviceDatabase
+from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
-from helper import data_bytes_size
+from helper import data_bytes_size, get_time
 from api import (
-    all_tenant_apps,
+    # all_tenant_apps,
     all_tenant_deveui,
     get_device_data
 )
@@ -32,27 +34,51 @@ RPOOL = redis.ConnectionPool(host=REDIS_SERVER, port=6379, db=0)
 RDB = redis.Redis(connection_pool=RPOOL, decode_responses=True)
 
 database = DeviceDatabase()
+hpr = HeliumConfigCli()
 
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # RUN PROGRAM
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
+async def h_skfs():
+    print('START HELIUM SKFS')
+    skfs = await hpr.route_skfs_list()
+    print(json.dumps(skfs, indent=4))
+    print('END HELIUM SKFS')
+    return skfs
 
-async def main():
-    await database.create_tables()
 
+async def devices_upsert():
+    print('RUNNING SQLITE DB SYNC')
+    devices = []
     device_euis = await all_tenant_deveui()
     for dev_eui in device_euis:
+        # # use api to collect device data
         device = await get_device_data(dev_eui)
-        print(device)
-        await database.upsert_device(device)
-    await asyncio.sleep(20)
+        d = GetDeviceSyncRequest(**device)
+        devices.append((
+            str(d.devEui),
+            str(d.name),
+            str(d.isDisabled),
+            str(d.variables),
+            str(d.tags),
+            str(d.joinEui),
+            str(d.devAddr),
+            str(d.nwkKey),
+            str(d.appSKey),
+            str(d.nwkSEncKey),
+        ))
+    print(devices)
+    await database.upsert_device(devices)
+    print('END RUNNING SQLITE DB SYNC')
 
-#while True:
-#    asyncio.run(main())
 
 async def redis_events_streams():
+    # create sqlite db tables if not exist...
     await database.create_tables()
+    await devices_upsert()
+
+    _time = get_time()
     i = 0
     request_stream = 'api:stream:request'
     device_stream = 'device:stream:event'
@@ -60,6 +86,12 @@ async def redis_events_streams():
 
     while True:
         try:
+            if time.time() > _time + 300:
+                _time = time.time()
+            #     asyncio.create_task(h_skfs())
+            #     await asyncio.sleep(0)
+                asyncio.create_task(devices_upsert())
+
             resp = await RDB.xread(
                 streams={
                     request_stream: lid_id,
@@ -108,14 +140,14 @@ async def redis_events_streams():
                     # print uplink information
                     print(json.dumps(req, indent=4))
 
-                    # avoid creating an intermediate list and only iterate over the data once
+                    tenant_id = req['deviceInfo']['tenantId']
+                    tenant_name = req['deviceInfo']['tenantName']
+
+                    # avoid creating an intermediate list and only iterate over data once
                     hotspots = sum(
                         1 for gw in req['rxInfo']
                         if gw['metadata'].get('network') == 'helium_iot'
                     )
-
-                    # device_data = await get_device_data(req['deviceInfo']['devEui'])
-                    # print(device_data)
 
                     if req.get('data'):
                         print('Data:', req['data'])
@@ -123,11 +155,11 @@ async def redis_events_streams():
                         dc = data_bytes_size(req['data'])
                         count = dc * hotspots
                         print('Hotspot Count:', hotspots, 'DC Used:', count)
-                        await database.upsert_data_credits(req['deviceInfo']['tenantId'], req['deviceInfo']['tenantName'], count)
+                        await database.upsert_data_credits(tenant_id, tenant_name, count)
                     else:
                         # blank uplink data cost * hotspots seen
                         print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
-                        await database.upsert_data_credits(req['deviceInfo']['tenantId'], req['deviceInfo']['tenantName'], hotspots)
+                        await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
 
                     print('^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ DEVICE UPLINK EVENT ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^')
 
