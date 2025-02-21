@@ -7,9 +7,9 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-*.bin/**
-*.db/**
-*.sqlite/**
+*.bin
+*.db
+*.sqlite
 
 .Python
 build/

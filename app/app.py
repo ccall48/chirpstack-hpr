@@ -144,10 +144,11 @@ async def redis_events_streams():
                     tenant_name = req['deviceInfo']['tenantName']
 
                     # avoid creating an intermediate list and only iterate over data once
-                    hotspots = sum(
-                        1 for gw in req['rxInfo']
-                        if gw['metadata'].get('network') == 'helium_iot'
-                    )
+                    hotspots = sum(1 for gw in req['rxInfo'] if gw.get('metadata',{}).get('network') == 'helium_iot')
+                    #hotspots = sum(
+                    #    1 for gw in req['rxInfo']
+                    #    if gw['metadata'].get('network') == 'helium_iot'
+                    #)
 
                     if req.get('data'):
                         print('Data:', req['data'])
