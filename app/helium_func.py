@@ -1,3 +1,4 @@
+import asyncio
 import time
 from math import ceil
 
@@ -15,3 +16,9 @@ def data_bytes_size(b64string: str) -> int:
 
 def get_time():
     return int(time.time())
+
+
+async def periodic_function(delay):
+    # do something
+    await asyncio.sleep(delay)
+    asyncio.get_event_loop().call_later(delay, periodic_function)

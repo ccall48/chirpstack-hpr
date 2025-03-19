@@ -1,9 +1,9 @@
 import os
-import asyncio
-import json
+# import asyncio
+# import json
 import grpc
-from google.protobuf.json_format import MessageToJson, MessageToDict
-from chirpstack_api import api, integration, stream
+from google.protobuf.json_format import MessageToDict  # , MessageToJson
+from chirpstack_api import api  # , integration, stream
 from dotenv import load_dotenv
 
 
@@ -16,6 +16,23 @@ CHIRPSTACK_APIKEY = os.getenv('CHIRPSTACK_APIKEY')
 AUTH_TOKEN = [('authorization', f'Bearer {CHIRPSTACK_APIKEY}')]
 
 
+# # # # # # # # # #
+#  Get device EUI's
+# # # # #
+async def get_device_euis(dev_eui) -> int | int:
+    async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
+        client = api.DeviceServiceStub(channel)
+        req = api.GetDeviceRequest()
+        req.dev_eui = dev_eui
+        resp = await client.Get(req, metadata=AUTH_TOKEN)
+        data = MessageToDict(resp)['device']
+        # return integer value for HPR
+    return int(data['devEui'], 16), int(data['joinEui'], 16)
+
+
+# # # # # # # # # #
+#  Functions for database device sync
+# # # # #
 async def get_tenant_list() -> list[str]:
     async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
         client = api.TenantServiceStub(channel)
@@ -58,6 +75,33 @@ async def get_application_devices(application_id: str) -> list[str]:
 
 
 async def get_device_data(dev_eui: str) -> dict:
+    """ example full output
+    {
+        "devEui": "2cf7f1c053800000",
+        "name": "T1000A-WDRIoT-004",
+        "description": "Disabled",
+        "applicationId": "826ffd30-0286-43e9-b174-d58d3aabc1f0",
+        "deviceProfileId": "abd8d5af-8d58-49ab-a420-a4ff028ba72b",
+        "variables": {
+            "ThingsBoardAccessToken": "PpG1jeVwwx6erVnSnF1c",
+            "max_copies": "10"
+        },
+        "joinEui": "7c3b5e861683b000",
+        "skipFcntCheck": false,
+        "isDisabled": false,
+        "tags": {},
+        "devAddr": "780001e6",
+        "appSKey": "f618237213154bb1886b2b5370bf4000",
+        "nwkSEncKey": "badfa2746a9aa9f022534f941d373000",
+        "fCntUp": 467,
+        "nFCntDown": 13,
+        "sNwkSIntKey": "badfa2746a9aa9f022534f941d373000",
+        "fNwkSIntKey": "badfa2746a9aa9f022534f941d373000",
+        "aFCntDown": 0,
+        "nwkKey": "dcf45e151d003f8b707afbb875f72000",
+        "appKey": "00000000000000000000000000000000"
+        }
+    """
     async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
         client = api.DeviceServiceStub(channel)
         req = api.GetDeviceRequest()

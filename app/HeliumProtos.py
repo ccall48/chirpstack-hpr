@@ -11,6 +11,16 @@ from helium_py.crypto.keypair import SodiumKeyPair
 from protos.helium import iot_config
 from grpclib.client import Channel
 
+from models import DeviceDatabase
+
+from api import (
+    get_device_euis,
+    # all_tenant_deveui,
+    get_device_data,
+)
+
+from schemas import GetRouteSkfsList, GetDeviceSyncRequest
+
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # HELIUM gRPC API CALLS
@@ -21,6 +31,7 @@ class HeliumConfigCli:
         self.helium_port = int(os.getenv('HELIUM_PORT', default=6080))
         self.helium_oui = int(os.getenv('HELIUM_OUI', default=None))
         self.route_id = os.getenv('ROUTE_ID', None)
+        self.database = DeviceDatabase()
         # self.delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
         self.delegate_key = r'/app/delegate_key.bin'
 
@@ -33,30 +44,31 @@ class HeliumConfigCli:
                 )
             )
 
-    async def route_euis(self, app_eui: str, dev_eui: str, action: bool):
+    def chunker(self, seq, size):
+        return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+    async def route_euis(self, dev_eui: str, join_eui: str, action: bool):
         """ Example device euis update, pairs to be sent as integers
             euis_action: list ->
             [
                 iot_config.RouteUpdateEuisReqV1(
                     action=iot_config.ActionV1(`enum`), # 0 add, 1 remove
                     eui_pair=iot_config.EuiPairV1(
-                        route_id=route_id,
-                        app_eui=app_eui,
-                        dev_eui=dev_eui
+                        route_id=`uuid`,
+                        app_eui=`uint32`,
+                        dev_eui=`uint32`,
                 ),
                 ...
             ]
         """
-        # app_eui = int(app_eui, 16)
-        # dev_eui = int(dev_eui, 16)
         async with Channel(self.helium_host, self.helium_port) as channel:
             service = iot_config.RouteStub(channel)
             req = iot_config.RouteUpdateEuisReqV1(
                 action=iot_config.ActionV1(action),
                 eui_pair=iot_config.EuiPairV1(
                     route_id=self.route_id,
-                    app_eui=app_eui,
-                    dev_eui=dev_eui
+                    app_eui=join_eui,
+                    dev_eui=dev_eui,
                 ),
                 timestamp=int(time.time()),
                 signer=self.delegate_keypair.address.bin
@@ -73,8 +85,8 @@ class HeliumConfigCli:
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
                     devaddr=`uint32`,
                     session_key=`str`,
-                    action=iot_config.ActionV1(`enum`), # 0 add, 1 remove
-                    max_copies=`uint32`
+                    action=iot_config.ActionV1(`enum`),  # 0 add, 1 remove
+                    max_copies=`uint32`  # not required for removal
                 ),
                 ...
             ]
@@ -89,7 +101,8 @@ class HeliumConfigCli:
             )
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             resp = await service.update_skfs(req)
-        return json.dumps(resp.to_dict(), indent=2)
+        print(json.dumps(resp.to_dict(), indent=2))
+        return
 
     async def route_skfs_list(self) -> list[dict]:
         """get all skfs assicated with a route id"""
@@ -103,15 +116,17 @@ class HeliumConfigCli:
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             all_skfs = []
             async for skfs in service.list_skfs(req):
-                device = skfs.to_dict()
-                device['devaddr'] = hex(device['devaddr'])[2:]
-                if 'maxCopies' not in device.keys():
-                    device['maxCopies'] = 0
+                # device = skfs.to_dict()
+                # device['devaddr'] = hex(device['devaddr'])[2:]
+                # if 'maxCopies' not in device.keys():
+                #     device['maxCopies'] = 0
+                d = GetRouteSkfsList(**skfs.to_dict())
+                device = {'routeId': d.routeId, 'devaddr': d.devaddr, 'sessionKey': d.sessionKey, 'maxCopies': d.maxCopies}
                 all_skfs.append(device)
         return all_skfs
 
     async def route_skfs_devaddr(self, devaddr) -> list[dict]:
-        """get skfs only assicated to a devaddr"""
+        """get skfs assicated with a single devaddr"""
         async with Channel(self.helium_host, self.helium_port) as channel:
             service = iot_config.RouteStub(channel)
             req = iot_config.RouteSkfGetReqV1(
@@ -129,3 +144,101 @@ class HeliumConfigCli:
                     device['maxCopies'] = 0
                 all_skfs.append(device)
         return all_skfs
+
+    # # # # # # # # # #
+    # add / remove device euis from HPR
+    # # # # #
+    async def add_device_euis(self, meta):
+        action = 0
+        device = meta['dev_eui']
+        dev_eui, join_eui = await get_device_euis(device)
+        return await self.route_euis(int(dev_eui, 16), int(join_eui, 16), action)
+
+    async def remove_device_euis(self, meta):
+        action = 1
+        device = meta['dev_eui']
+        dev_eui, join_eui = await self.database.get_device_euis(device)
+        return await self.route_euis(dev_eui, join_eui, action)
+
+    async def update_device(self, meta):
+        """
+        {
+            "service": "api.DeviceService",
+            "method": "Update",
+            "metadata": {
+                "dev_eui": "2cf7f1c053800309",
+                "is_disabled": "false"
+            }
+        }
+        """
+        device = await get_device_data(meta['dev_eui'])
+        d = GetDeviceSyncRequest(**device)
+
+        if d.isDisabled:
+            # remove euis - action = 1
+            await self.route_euis(d.devEui, d.joinEui, 1)
+            # remove skfs
+            skfs_to_remove = [
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=d.devAddr,
+                    session_key=d.nwkSEncKey,
+                    action=iot_config.ActionV1(1),
+                )
+            ]
+            await self.route_skfs(skfs_to_remove)
+
+        if not d.isDisabled:
+            # add euis - action = 0
+            await self.route_euis(d.devEui, d.joinEui, 0)
+            # sync skfs with max_copies update
+            skfs_to_update = [
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=d.devAddr,
+                    session_key=d.nwkSEncKey,
+                    action=iot_config.ActionV1(0),
+                    max_copies=d.variables.get('max_copies', 0)
+                )
+            ]
+            await self.route_skfs(skfs_to_update)
+
+    # # # # # # # # # #
+    # Purge stale skfs
+    # # # # #
+    async def remove_stale_skfs(self):
+        # iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+        #     devaddr=d.devAddr,
+        #     session_key=d.nwkSEncKey,
+        #     action=iot_config.ActionV1(1),
+        # )
+        stale_skfs_list = await self.database.get_stale_skfs()
+        skfs_to_remove = []
+        for skfs in stale_skfs_list:
+            print(int(skfs['DevAddr']), skfs['sessionKey'])
+            skfs_to_remove.append(
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=int(skfs['DevAddr']),
+                    session_key=skfs['sessionKey'],
+                    action=iot_config.ActionV1(1),
+                )
+            )
+        # print(skfs_to_remove)
+        if skfs_to_remove:
+            # print(skfs_to_remove)
+            # # add update chunker to limit update to max 100 per request
+            # await self.route_skfs(skfs_to_remove)
+            for group in self.chunker(skfs_to_remove, 100):
+                await self.route_skfs(group)
+
+
+#    # # # # # # # # # #
+#    # add / remove / update device skfs on HPR
+#    # # # # #
+#
+#    async def add_skfs(self, args):
+#        pass
+#
+#    async def remove_skfs(self, args):
+#        pass
+#
+#    async def update_skfs(self, args):
+#        pass
