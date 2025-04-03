@@ -50,7 +50,7 @@ class DeviceDatabase:
         # device = GetDeviceSyncRequest(**kwargs)
         sql = """
             INSERT INTO devices
-            (devEui, name, isDisabled, variables, tags, joinEui, devAddr, nwkKey, appSKey, nwkSEncKey, route_id)
+            (devEui, name, isDisabled, variables, tags, joinEui, devAddr, nwkKey, appSKey, nwkSEncKey, routeId)
             VALUES (:devEui, :name, :isDisabled, :variables, :tags, :joinEui, :devAddr, :nwkKey, :appSKey, :nwkSEncKey, :route_id)
             ON CONFLICT(devEui) DO UPDATE
             SET name=:name,
@@ -62,7 +62,7 @@ class DeviceDatabase:
                 nwkKey=:nwkKey,
                 appSKey=:appSKey,
                 nwkSEncKey=:nwkSEncKey,
-                route_id=:route_id
+                routeId=:route_id
             """
         async with aiosqlite.connect(self.database) as db:
             try:

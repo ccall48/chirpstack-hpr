@@ -27,7 +27,8 @@ async def get_device_euis(dev_eui) -> int | int:
         resp = await client.Get(req, metadata=AUTH_TOKEN)
         data = MessageToDict(resp)['device']
         # return integer value for HPR
-    return int(data['devEui'], 16), int(data['joinEui'], 16)
+    # return int(data['devEui'], 16), int(data['joinEui'], 16)
+    return data['devEui'], data['joinEui']
 
 
 # # # # # # # # # #
