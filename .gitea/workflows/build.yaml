@@ -4,27 +4,46 @@ name: Build and push image
 on:
   push:
     branches:
-        - master
+      - master
 
 jobs:
-  deploy:
-    # runs-on: self-hosted
+  ProjectTest:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: /app
     steps:
-      - name: Set git remote if not already set
-        run: git remote -v | grep -w gitea || git remote add gitea "./gitea/git/repositories/${GITHUB_REPOSITORY,,}.git"
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
-      - name: Checkout repo
-        run: git pull gitea master
 
-      - name: Deploy
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
-          docker build -t ccall48/chirpstack-hpr-v2:latest .
-          docker push ccall48/chirpstack-hpr-v2
+# name: Build and push image
+# 
+# on:
+#   push:
+#     branches:
+#         - master
+# 
+# jobs:
+#   deploy:
+#     # runs-on: self-hosted
+#     runs-on: ubuntu-latest
+#     defaults:
+#       run:
+#         working-directory: /app
+#     steps:
+#       - name: Set git remote if not already set
+#         run: git remote -v | grep -w gitea || git remote add gitea "./gitea/git/repositories/${GITHUB_REPOSITORY,,}.git"
+# 
+#       - name: Checkout repo
+#         run: git pull gitea master
+# 
+#       - name: Deploy
+#         run: |
+#           echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+#           docker build -t ccall48/chirpstack-hpr-v2:latest .
+#           docker push ccall48/chirpstack-hpr-v2
+
 
 # .gitea/workflows/build.yaml
 # name: Gitea Actions Chirpstack-hpr-v2
