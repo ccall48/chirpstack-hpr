@@ -31,7 +31,7 @@ jobs:
           push: true
           tags: |
             ccall48/chirpstack-hpr-v2:latest
-            ccall48/chirpstack-hpr-v2:${{ github.event.pull_request.head.sha }}  #${{ gitea.sha }}
+            ccall48/chirpstack-hpr-v2:${{ gitea.sha }}  # ${{ github.event.pull_request.head.sha }}
         
       #- name: Build and push
       #  # uses: docker/build-push-action@v4
