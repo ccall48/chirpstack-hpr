@@ -1,5 +1,4 @@
 aiosqlite
-# asyncpg
 base58
 betterproto
 chirpstack_api
@@ -7,12 +6,12 @@ googleapis-common-protos
 grpcio
 grpclib
 helium_py
-# orjson
-protobuf
+protobuf==5.29.4
 pydantic
 pydantic-extra-types
 PyNaCl
 python-dotenv
 redis
-# SQLAlchemy
+SQLAlchemy
 xxhash
+
