@@ -14,34 +14,34 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+          logout: true
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      # - name: Set up QEMU
+      #   uses: docker/setup-qemu-action@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # - name: Set up Docker Buildx
+      #   uses: docker/setup-buildx-action@v3
 
-      # - name: Build and push
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     platforms: linux/amd64,linux/arm64
-      #     push: true
-      #     tags: ccall48/chirpstack-hpr-v2:latest
-        
       - name: Build and push
-        # uses: docker/build-push-action@v4
         uses: docker/build-push-action@v6
         with:
-          # context: .
-          # context: /
-          context: app/
+          context: .
           file: ./Dockerfile
-          platforms: |
-            linux/amd64
-            linux/arm64                        
+          platforms: linux/amd64 #,linux/arm64
           push: true
-          tags: ccall48/chirpstack-hpr-v2:latest
+          tags: |
+            ccall48/chirpstack-hpr-v2:latest
+            ccall48/chirpstack-hpr-v2:${{ github.event.pull_request.head.sha }}  #${{ gitea.sha }}
+        
+      #- name: Build and push
+      #  # uses: docker/build-push-action@v4
+      #  uses: docker/build-push-action@v6
+      #  with:
+      #    context: .
+      #    file: ./Dockerfile
+      #    platforms: |
+      #      linux/amd64
+      #      linux/arm64                        
+      #    push: true
+      #    tags: ccall48/chirpstack-hpr-v2:latest
 
-          #tags: | # replace it with your local IP and tags
-          #  192.168.8.30:3000/${{ env.DOCKER_ORG }}/${{ steps.meta.outputs.REPO_NAME }}:${{ steps.meta.outputs.REPO_VERSION }}
-          #  192.168.8.30:3000/${{ env.DOCKER_ORG }}/${{ steps.meta.outputs.REPO_NAME }}:${{ env.DOCKER_LATEST }}
