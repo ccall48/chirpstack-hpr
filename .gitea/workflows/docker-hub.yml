@@ -33,7 +33,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           # context: .
-          context: /
+          # context: /
+          context: app/
           file: ./Dockerfile
           platforms: |
             linux/amd64
