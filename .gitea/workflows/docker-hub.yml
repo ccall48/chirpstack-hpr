@@ -29,7 +29,7 @@ jobs:
           # file: ./Dockerfile
           platforms: linux/amd64 #,linux/arm64
           push: true
-          tags: ccall48/chirpstack-hpr-v2:latest
+          tags: ccall48/chirpstack-hpr-v2:latest,ccall48/chirpstack-hpr-v2:${{ gitea.sha  }}
           #tags: |
           #  ccall48/chirpstack-hpr-v2:latest
           #  ccall48/chirpstack-hpr-v2:1234  #${{ gitea.sha }}  # ${{ github.event.pull_request.head.sha }}

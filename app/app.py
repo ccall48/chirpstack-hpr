@@ -1,6 +1,6 @@
 import os
 import asyncio
-# import time
+import time
 import json
 import random
 import redis.asyncio as redis
@@ -21,7 +21,6 @@ from api import (
     get_device_data,
 )
 
-route_id = os.getenv('ROUTE_ID', None)
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # GLOBAL VARIABLES
@@ -31,6 +30,8 @@ load_dotenv()
 CHIRPSTACK_HOST = os.getenv('CHIRPSTACK_SERVER')
 CHIRPSTACK_APIKEY = os.getenv('CHIRPSTACK_APIKEY')
 AUTH_TOKEN = [('authorization', f'Bearer {CHIRPSTACK_APIKEY}')]
+
+route_id = os.getenv('ROUTE_ID', None)
 
 redis_server = os.getenv('REDIS_HOST')
 rpool = redis.ConnectionPool(host=redis_server, port=6379, db=0)
@@ -42,6 +43,20 @@ hpr = HeliumConfigCli()
 
 def sleep_time(start, stop, step):
     return random.randrange(start, stop, step)
+
+
+async def async_run_every(func: str, interval: int):
+    name = str(func)
+    while True:
+        try:
+            # start = time.time()
+            print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
+            await func()
+            # stop = time.time()
+            await asyncio.sleep(interval)
+        except Exception as err:
+            print(f'{name} Error: {err}')
+            pass
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # RUN PROGRAM
@@ -89,14 +104,79 @@ async def devices_sync_upsert():
         await asyncio.sleep(sleeping)
 
 
+async def first_sync_session_keys():
+    """Run first on start to ensure sync of all existing device session keys with hpr"""
+    print('START FIRST HELIUM SESSIONKEY SYNC')
+    devices = []
+    device_euis = await all_tenant_deveui()
+    for dev_eui in device_euis:
+        # # use api to collect device data
+        device = await get_device_data(dev_eui)
+        d = GetDeviceSyncRequest(**device)
+        is_private = d.variables.get('private', False)
+        max_copies = d.variables.get('max_copies', 0)
+
+        if d.isDisabled:
+            # skip if disabled device
+            print('Disabled', d.devEui, d.name)
+            continue
+
+        if is_private:
+            # skip if device set as private
+            print('Private', d.devEui, d.name)
+            continue
+
+        if not d.nwkSEncKey:
+            # skip if new device has not joined or got a session key
+            continue
+
+        devices.append(
+            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                devaddr=d.devAddr,
+                session_key=d.nwkSEncKey,
+                action=iot_config.ActionV1(0),
+                max_copies=max_copies
+            )
+        )
+    await hpr.route_skfs(devices)
+    print('END FIRST HELIUM SESSIONKEY SYNC')
+
+
+#async def sync_skfs_on_device_update(dev_eui):
+#    """single device skfs update"""
+#    device = await get_device_data(dev_eui)
+#    d = GetDeviceSyncRequest(**device)
+#    is_private = d.variables.get('private', False)
+#    max_copies = d.variables.get('max_copies', 0)
+#
+#    if d.isDisabled:
+#        # skip if disabled device
+#        print('Disabled', d.devEui, d.name)
+#        return
+#    if is_private:
+#        # skip if device set as private
+#        print('Private', d.devEui, d.name)
+#        return
+#    if not d.nwkSEncKey:
+#        # skip if new device has not joined or got a session key
+#        return
+#
+#    device_skfs = [
+#            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+#                devaddr=d.devAddr,
+#                session_key=d.nwkSEncKey,
+#                action=iot_config.ActionV1(0),
+#                max_copies=max_copies
+#            )
+#    ]
+#    print('UPDATE SINGLE DEVICE')
+#    await hpr.route_skfs(device_skfs)
+
+
 async def sync_session_keys():
     while True:
         print('START RUNNING SKFS PURGE')
         await hpr.remove_stale_skfs()
-#        skfs_to_remove = await database.get_stale_skfs()
-#        # add chunker for if > 100 devices
-#        print(skfs_to_remove)
-#        await hpr.route_skfs(skfs_to_remove)
         sleeping = sleep_time(43150, 43200, 5)
         print(f'END RUNNING SKFS PURGE SLEEPING: {sleeping} mins')
         # await asyncio.sleep(600)
@@ -104,10 +184,6 @@ async def sync_session_keys():
 
 
 async def redis_events_streams():
-    # create sqlite db tables if not exist...
-    await database.create_tables()
-
-    # i = 0
     request_stream = 'api:stream:request'
     device_stream = 'device:stream:event'
     lid_id = '0'
@@ -132,9 +208,6 @@ async def redis_events_streams():
                     if b'inform' in msg:
                         # ignore {"service": "inform"}
                         continue
-
-                    # print(f'{i} = v REQUEST v EVENT REQUEST v REQUEST v =')
-                    # print(msg)
 
                     pl = stream.ApiRequestLog()
                     pl.ParseFromString(msg)
@@ -231,7 +304,7 @@ async def redis_events_streams():
                         await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
 
                     print('^ ^ ^ ^ ^ ^ ^ DEVICE UPLINK EVENT ^ ^ ^ ^ ^ ^ ^')
-                # i += 1
+
             await asyncio.sleep(0)
 
         except Exception as exc:
@@ -243,11 +316,18 @@ async def redis_events_streams():
 
 
 async def main():
+    # create sqlite db and tables if not exist
+    await database.create_tables()
+    # handle init sync of skfs for devices on start
+    await first_sync_session_keys()
+    await asyncio.sleep(2)
+
     tasks = [
         redis_events_streams(),
         devices_sync_upsert(),
         get_helium_skfs(),
         sync_session_keys(),
+        # async_run_every(first_sync_session_keys, 600)
     ]
     await asyncio.gather(*tasks)
 

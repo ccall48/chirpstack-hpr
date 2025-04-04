@@ -1,7 +1,6 @@
 services:
   chirpstack-hpr-v2:
-    image: ccall48/chirpstack-hpr-v2:latest
-    # build: .
+    build: .
     container_name: chirpstack-hpr-v2-dev
     restart: unless-stopped
     volumes:
