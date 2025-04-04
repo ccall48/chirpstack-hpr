@@ -14,7 +14,7 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          logout: true
+          # logout: true
 
       # - name: Set up QEMU
       #   uses: docker/setup-qemu-action@v3
@@ -29,9 +29,10 @@ jobs:
           # file: ./Dockerfile
           platforms: linux/amd64 #,linux/arm64
           push: true
-          tags: |
-            ccall48/chirpstack-hpr-v2:latest
-            ccall48/chirpstack-hpr-v2:1234  #${{ gitea.sha }}  # ${{ github.event.pull_request.head.sha }}
+          tags: ccall48/chirpstack-hpr-v2:latest
+          #tags: |
+          #  ccall48/chirpstack-hpr-v2:latest
+          #  ccall48/chirpstack-hpr-v2:1234  #${{ gitea.sha }}  # ${{ github.event.pull_request.head.sha }}
         
       #- name: Build and push
       #  # uses: docker/build-push-action@v4
