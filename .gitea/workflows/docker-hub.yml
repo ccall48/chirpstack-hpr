@@ -29,9 +29,11 @@ jobs:
       #     tags: ccall48/chirpstack-hpr-v2:latest
         
       - name: Build and push
-        uses: docker/build-push-action@v4
+        # uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
-          context: .
+          # context: .
+          context: /
           file: ./Dockerfile
           platforms: |
             linux/amd64
