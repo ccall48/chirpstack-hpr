@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           platforms: linux/amd64
-          push: true
+          push: false
           tags: |
             ccall48/chirpstack-hpr-v2:latest
-            ccall48/chirpstack-hpr-v2:${{ gitea.sha  }}
+            ccall48/chirpstack-hpr-v2:${{ gitea.sha::8  }}
