@@ -14,34 +14,22 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          # logout: true
 
-      # - name: Set up QEMU
-      #   uses: docker/setup-qemu-action@v3
-
-      # - name: Set up Docker Buildx
-      #   uses: docker/setup-buildx-action@v3
+      - name: Cache python packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          # context: .
-          # file: ./Dockerfile
-          platforms: linux/amd64 #,linux/arm64
+          platforms: |
+            linux/amd64
+            linux/arm64
           push: true
-          tags: ccall48/chirpstack-hpr-v2:latest,ccall48/chirpstack-hpr-v2:${{ gitea.sha  }}
-          #tags: |
-          #  ccall48/chirpstack-hpr-v2:latest
-          #  ccall48/chirpstack-hpr-v2:1234  #${{ gitea.sha }}  # ${{ github.event.pull_request.head.sha }}
-        
-      #- name: Build and push
-      #  # uses: docker/build-push-action@v4
-      #  uses: docker/build-push-action@v6
-      #  with:
-      #    context: .
-      #    file: ./Dockerfile
-      #    platforms: |
-      #      linux/amd64
-      #      linux/arm64                        
-      #    push: true
-      #    tags: ccall48/chirpstack-hpr-v2:latest
+          tags: |
+            ccall48/chirpstack-hpr-v2:latest
+            ccall48/chirpstack-hpr-v2:${{ gitea.sha  }}

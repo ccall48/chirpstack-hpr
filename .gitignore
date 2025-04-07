@@ -1,4 +1,6 @@
 # project ignore, directories and sqlite databases
+*.sqlite
+*.db
 app/*.sqlite
 app/*.db
 app/testing/*
