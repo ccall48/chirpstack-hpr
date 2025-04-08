@@ -116,61 +116,37 @@ async def first_sync_session_keys():
         is_private = d.variables.get('private', False)
         max_copies = d.variables.get('max_copies', 0)
 
-        if d.isDisabled:
-            # skip if disabled device
-            print('Disabled', d.devEui, d.name)
-            continue
-
-        if is_private:
-            # skip if device set as private
-            print('Private', d.devEui, d.name)
-            continue
-
         if not d.nwkSEncKey:
-            # skip if new device has not joined or got a session key
+            # skip if device has not joined or got a session key yet ignore
             continue
 
-        devices.append(
-            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                devaddr=d.devAddr,
-                session_key=d.nwkSEncKey,
-                action=iot_config.ActionV1(0),
-                max_copies=max_copies
+        if d.isDisabled or is_private:
+            # remove skfs for disabled or private device, inital response
+            # was to skip syncing which doesnt take into account existing.
+            print('Disabled', d.devEui, d.name)
+            # continue
+            devices.append(
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=d.devAddr,
+                    session_key=d.nwkSEncKey,
+                    action=iot_config.ActionV1(1),
+                    max_copies=max_copies
+                )
             )
-        )
+        else:
+            # Sync device skfs
+            print('Enabled', d.devEui, d.name)
+            devices.append(
+                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=d.devAddr,
+                    session_key=d.nwkSEncKey,
+                    action=iot_config.ActionV1(0),
+                    max_copies=max_copies
+                )
+            )
+
     await hpr.route_skfs(devices)
     print('END FIRST HELIUM SESSIONKEY SYNC')
-
-
-#async def sync_skfs_on_device_update(dev_eui):
-#    """single device skfs update"""
-#    device = await get_device_data(dev_eui)
-#    d = GetDeviceSyncRequest(**device)
-#    is_private = d.variables.get('private', False)
-#    max_copies = d.variables.get('max_copies', 0)
-#
-#    if d.isDisabled:
-#        # skip if disabled device
-#        print('Disabled', d.devEui, d.name)
-#        return
-#    if is_private:
-#        # skip if device set as private
-#        print('Private', d.devEui, d.name)
-#        return
-#    if not d.nwkSEncKey:
-#        # skip if new device has not joined or got a session key
-#        return
-#
-#    device_skfs = [
-#            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-#                devaddr=d.devAddr,
-#                session_key=d.nwkSEncKey,
-#                action=iot_config.ActionV1(0),
-#                max_copies=max_copies
-#            )
-#    ]
-#    print('UPDATE SINGLE DEVICE')
-#    await hpr.route_skfs(device_skfs)
 
 
 async def sync_session_keys():
@@ -262,18 +238,31 @@ async def redis_events_streams():
                     print(device)
                     await database.upsert_device(device)
 
-                    # sync with Helium Pakcet Router
-                    add_join_skfs = [
-                        iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                            devaddr=d.devAddr,
-                            session_key=d.nwkSEncKey,
-                            # 0 add, 1 remove
-                            action=iot_config.ActionV1(0),
-                            # device max_copies if set, else 0 for default
-                            max_copies=d.variables.get('max_copies', 0)
-                        )
-                    ]
-                    await hpr.route_skfs(add_join_skfs)
+                    if d.variables.get('private', False):
+                        # if device is private, do not sync with hpr.
+                        sync_join_skfs = [
+                            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                                devaddr=d.devAddr,
+                                session_key=d.nwkSEncKey,
+                                # 0 add, 1 remove
+                                action=iot_config.ActionV1(1),
+                                # device max_copies if set, else 0 for default
+                                max_copies=d.variables.get('max_copies', 1)
+                            )
+                        ]
+                    else:
+                        # sync with Helium Pakcet Router
+                        sync_join_skfs = [
+                            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                                devaddr=d.devAddr,
+                                session_key=d.nwkSEncKey,
+                                # 0 add, 1 remove
+                                action=iot_config.ActionV1(0),
+                                # device max_copies if set, else 0 for default
+                                max_copies=d.variables.get('max_copies', 1)
+                            )
+                        ]
+                    await hpr.route_skfs(sync_join_skfs)
                 # print('- - - - - - - - - - - - - - - - - - - - - - - - -')
 
                 if b'up' in message[1]:
@@ -287,8 +276,9 @@ async def redis_events_streams():
 
                     tenant_id = req['deviceInfo']['tenantId']
                     tenant_name = req['deviceInfo']['tenantName']
+                    device_name = req['deviceInfo']['deviceName']
 
-                    # avoid creating an intermediate list, only iterate over data once
+                    # avoid creating an intermediate list, only iterate over data once.
                     hotspots = sum(1 for gw in req['rxInfo'] if gw.get('metadata', {}).get('network') == 'helium_iot')
 
                     if req.get('data'):
@@ -296,10 +286,13 @@ async def redis_events_streams():
 
                         dc = data_bytes_size(req['data'])
                         total_dc = dc * hotspots
+
+                        print('Tenant:', tenant_name, 'Device:', device_name)
                         print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
                         await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
                     else:
                         # blank uplink data cost * hotspots seen
+                        print('Tenant:', tenant_name, 'Device:', device_name)
                         print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
                         await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
 
@@ -318,7 +311,7 @@ async def redis_events_streams():
 async def main():
     # create sqlite db and tables if not exist
     await database.create_tables()
-    # handle init sync of skfs for devices on start
+    # handle initial sync of skfs for devices on start
     await first_sync_session_keys()
     await asyncio.sleep(2)
 

@@ -16,9 +16,9 @@ CHIRPSTACK_APIKEY = os.getenv('CHIRPSTACK_APIKEY')
 AUTH_TOKEN = [('authorization', f'Bearer {CHIRPSTACK_APIKEY}')]
 
 
-# # # # # # # # # #
+# ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 #  Get device EUI's
-# # # # #
+# ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_device_euis(dev_eui) -> int | int:
     async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
         client = api.DeviceServiceStub(channel)
@@ -31,9 +31,9 @@ async def get_device_euis(dev_eui) -> int | int:
     return data['devEui'], data['joinEui']
 
 
-# # # # # # # # # #
+# ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 #  Functions for database device sync
-# # # # #
+# ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_tenant_list() -> list[str]:
     async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
         client = api.TenantServiceStub(channel)

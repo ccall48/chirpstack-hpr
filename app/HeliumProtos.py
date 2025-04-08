@@ -22,6 +22,9 @@ from api import (
 from schemas import GetRouteSkfsList, GetDeviceSyncRequest
 
 
+def is_true(v):
+    return v.lower() in ('t', 'true', '1')
+
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # HELIUM gRPC API CALLS
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
@@ -145,9 +148,9 @@ class HeliumConfigCli:
                 all_skfs.append(device)
         return all_skfs
 
-    # # # # # # # # # #
+    # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # add / remove device euis from HPR
-    # # # # #
+    # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     async def add_device_euis(self, meta):
         action = 0
         device = meta['dev_eui']
@@ -174,7 +177,9 @@ class HeliumConfigCli:
         device = await get_device_data(meta['dev_eui'])
         d = GetDeviceSyncRequest(**device)
 
-        if d.isDisabled:
+        is_private = d.variables.get('private', False)
+
+        if d.isDisabled or is_private:
             # remove euis - action = 1
             await self.route_euis(d.devEui, d.joinEui, 1)
             # remove skfs
@@ -187,7 +192,7 @@ class HeliumConfigCli:
             ]
             await self.route_skfs(skfs_to_remove)
 
-        if not d.isDisabled:
+        elif not d.isDisabled:
             # add euis - action = 0
             await self.route_euis(d.devEui, d.joinEui, 0)
             # sync skfs with max_copies update
@@ -201,9 +206,9 @@ class HeliumConfigCli:
             ]
             await self.route_skfs(skfs_to_update)
 
-    # # # # # # # # # #
+    # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # Purge stale skfs
-    # # # # #
+    # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     async def remove_stale_skfs(self):
         stale_skfs_list = await self.database.get_stale_skfs()
         skfs_to_remove = []
