@@ -45,6 +45,10 @@ def sleep_time(start, stop, step):
     return random.randrange(start, stop, step)
 
 
+def chunker(seq, size):
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+
 async def async_run_every(func: str, interval: int):
     name = str(func)
     while True:
@@ -145,7 +149,10 @@ async def first_sync_session_keys():
                 )
             )
 
-    await hpr.route_skfs(devices)
+    for group in hpr.chunker(devices, 100):
+        # use chunker to limit update to max 100 per request
+        await hpr.route_skfs(group)
+    # await hpr.route_skfs(devices)
     print('END FIRST HELIUM SESSIONKEY SYNC')
 
 
