@@ -87,7 +87,7 @@ class GetDeviceActivation(BaseModel):
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 class GetRouteEuisList(BaseModel):
     """appEui == joinEui"""
-    routeId: str  # UUID
+    routeId: str
     joinEui: int = Field(validation_alias=AliasChoices('appEui'))
     devEui: int
 
