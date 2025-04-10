@@ -1,9 +1,7 @@
 import os
-# import asyncio
-# import json
 import grpc
-from google.protobuf.json_format import MessageToDict  # , MessageToJson
-from chirpstack_api import api  # , integration, stream
+from google.protobuf.json_format import MessageToDict
+from chirpstack_api import api
 from dotenv import load_dotenv
 
 
@@ -26,8 +24,6 @@ async def get_device_euis(dev_eui) -> int | int:
         req.dev_eui = dev_eui
         resp = await client.Get(req, metadata=AUTH_TOKEN)
         data = MessageToDict(resp)['device']
-        # return integer value for HPR
-    # return int(data['devEui'], 16), int(data['joinEui'], 16)
     return data['devEui'], data['joinEui']
 
 
