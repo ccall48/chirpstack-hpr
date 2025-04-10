@@ -1,29 +1,18 @@
 import os
 import json
 import time
-# import grpc
-# from google.protobuf.json_format import MessageToJson, MessageToDict
-
 import nacl.bindings
 from helium_py.crypto.keypair import Keypair
 from helium_py.crypto.keypair import SodiumKeyPair
-
 from protos.helium import iot_config
 from grpclib.client import Channel
-
 from models import DeviceDatabase
-
 from api import (
     get_device_euis,
-    # all_tenant_deveui,
     get_device_data,
 )
-
 from schemas import GetRouteSkfsList, GetDeviceSyncRequest
 
-
-def is_true(v):
-    return v.lower() in ('t', 'true', '1')
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # HELIUM gRPC API CALLS
@@ -35,7 +24,6 @@ class HeliumConfigCli:
         self.helium_oui = int(os.getenv('HELIUM_OUI', default=None))
         self.route_id = os.getenv('ROUTE_ID', None)
         self.database = DeviceDatabase()
-        # self.delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
         self.delegate_key = r'/app/delegate_key.bin'
 
         with open(self.delegate_key, 'rb') as f:
@@ -108,7 +96,7 @@ class HeliumConfigCli:
         return
 
     async def route_skfs_list(self) -> list[dict]:
-        """get all skfs assicated with a route id"""
+        """get all skfs assicated with a helium route id"""
         async with Channel(self.helium_host, self.helium_port) as channel:
             service = iot_config.RouteStub(channel)
             req = iot_config.RouteSkfListReqV1(
@@ -119,12 +107,13 @@ class HeliumConfigCli:
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             all_skfs = []
             async for skfs in service.list_skfs(req):
-                # device = skfs.to_dict()
-                # device['devaddr'] = hex(device['devaddr'])[2:]
-                # if 'maxCopies' not in device.keys():
-                #     device['maxCopies'] = 0
                 d = GetRouteSkfsList(**skfs.to_dict())
-                device = {'routeId': d.routeId, 'devaddr': d.devaddr, 'sessionKey': d.sessionKey, 'maxCopies': d.maxCopies}
+                device = {
+                    'routeId': d.routeId,
+                    'devaddr': d.devaddr,
+                    'sessionKey': d.sessionKey,
+                    'maxCopies': d.maxCopies
+                }
                 all_skfs.append(device)
         return all_skfs
 
@@ -141,10 +130,13 @@ class HeliumConfigCli:
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             all_skfs = []
             async for skfs in service.list_skfs(req):
-                device = skfs.to_dict()
-                device['devaddr'] = hex(device['devaddr'])[2:]
-                if 'maxCopies' not in device.keys():
-                    device['maxCopies'] = 0
+                d = GetRouteSkfsList(**skfs.to_dict())
+                device = {
+                    'routeId': d.routeId,
+                    'devaddr': d.devaddr,
+                    'sessionKey': d.sessionKey,
+                    'maxCopies': d.maxCopies
+                }
                 all_skfs.append(device)
         return all_skfs
 
