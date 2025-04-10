@@ -18,13 +18,6 @@ services:
       - CHIRPSTACK_SERVER=${CHIRPSTACK_SERVER}
       - CHIRPSTACK_APIKEY=${CHIRPSTACK_APIKEY}
       - REDIS_HOST=${REDIS_HOST}
-      # Database (Required)
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASS=${POSTGRES_PASS}
-      - POSTGRES_HOST=${POSTGRES_HOST}
-      - POSTGRES_PORT=${POSTGRES_PORT}
-      - POSTGRES_SSL_MODE=${POSTGRES_SSL_MODE}
-      - POSTGRES_DB=${POSTGRES_DB}
     command: sh -c 'cd /app && python app.py'
 
 networks:
