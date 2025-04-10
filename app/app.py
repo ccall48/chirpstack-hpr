@@ -4,7 +4,6 @@ import time
 import json
 import random
 import redis.asyncio as redis
-# import grpc
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from chirpstack_api import integration, stream
 from dotenv import load_dotenv
@@ -45,22 +44,17 @@ def sleep_time(start, stop, step):
     return random.randrange(start, stop, step)
 
 
-def chunker(seq, size):
-    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
-
-
 async def async_run_every(func: str, interval: int):
     name = str(func)
     while True:
         try:
-            # start = time.time()
             print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
             await func()
-            # stop = time.time()
             await asyncio.sleep(interval)
         except Exception as err:
             print(f'{name} Error: {err}')
             pass
+
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # RUN PROGRAM
@@ -73,7 +67,6 @@ async def get_helium_skfs():
         print(f'END HELIUM SKFS, SLEEPING: {sleeping} mins')
         # update synced helium skfs
         await database.upsert_helium_skfs(skfs)
-        # await asyncio.sleep(600)
         await asyncio.sleep(sleeping)
 
 
@@ -99,12 +92,9 @@ async def devices_sync_upsert():
                 str(d.nwkSEncKey),
                 route_id,
             ))
-        # print(devices)
         await database.upsert_device(devices)
         sleeping = sleep_time(3550, 3600, 5)
         print(f'END RUNNING SQLITE DB SYNC SLEEPING: {sleeping} mins')
-        # sleep 5 minutes / 300 seconds...
-        # await asyncio.sleep(300)
         await asyncio.sleep(sleeping)
 
 
@@ -114,21 +104,19 @@ async def first_sync_session_keys():
     devices = []
     device_euis = await all_tenant_deveui()
     for dev_eui in device_euis:
-        # # use api to collect device data
+        # use api to collect device data
         device = await get_device_data(dev_eui)
         d = GetDeviceSyncRequest(**device)
         is_private = d.variables.get('private', False)
         max_copies = d.variables.get('max_copies', 0)
 
         if not d.nwkSEncKey:
-            # skip if device has not joined or got a session key yet ignore
+            # skip if device does not have a skfs or joined yet.
             continue
 
         if d.isDisabled or is_private:
-            # remove skfs for disabled or private device, inital response
-            # was to skip syncing which doesnt take into account existing.
+            # remove skfs for a disabled or private device on inital sync.
             print('Disabled', d.devEui, d.name)
-            # continue
             devices.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
                     devaddr=d.devAddr,
@@ -138,7 +126,7 @@ async def first_sync_session_keys():
                 )
             )
         else:
-            # Sync device skfs
+            # Sync enabled and roaming device skfs.
             print('Enabled', d.devEui, d.name)
             devices.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
@@ -152,7 +140,6 @@ async def first_sync_session_keys():
     for group in hpr.chunker(devices, 100):
         # use chunker to limit update to max 100 per request
         await hpr.route_skfs(group)
-    # await hpr.route_skfs(devices)
     print('END FIRST HELIUM SESSIONKEY SYNC')
 
 
@@ -162,7 +149,6 @@ async def sync_session_keys():
         await hpr.remove_stale_skfs()
         sleeping = sleep_time(43150, 43200, 5)
         print(f'END RUNNING SKFS PURGE SLEEPING: {sleeping} mins')
-        # await asyncio.sleep(600)
         await asyncio.sleep(sleeping)
 
 
@@ -215,7 +201,6 @@ async def redis_events_streams():
                                 print('========== API Update Euis ==========')
                                 print(MessageToJson(pl))
                                 await hpr.update_device(req['metadata'])
-                    # print('- - - - - - - - - - - - - - - - - - - - - - - - -')
 
                 if b'join' in message[1]:
                     msg = message[1][b'join']
@@ -265,12 +250,11 @@ async def redis_events_streams():
                                 session_key=d.nwkSEncKey,
                                 # 0 add, 1 remove
                                 action=iot_config.ActionV1(0),
-                                # device max_copies if set, else 0 for default
-                                max_copies=d.variables.get('max_copies', 1)
+                                # set max_copies or 0 for default route amount
+                                max_copies=d.variables.get('max_copies', 0)
                             )
                         ]
                     await hpr.route_skfs(sync_join_skfs)
-                # print('- - - - - - - - - - - - - - - - - - - - - - - - -')
 
                 if b'up' in message[1]:
                     msg = message[1][b'up']
@@ -278,14 +262,11 @@ async def redis_events_streams():
                     pl.ParseFromString(msg)
                     req = MessageToDict(pl)
 
-                    # # print uplink information
-                    # print(json.dumps(req, indent=4))
-
                     tenant_id = req['deviceInfo']['tenantId']
                     tenant_name = req['deviceInfo']['tenantName']
                     device_name = req['deviceInfo']['deviceName']
 
-                    # avoid creating an intermediate list, only iterate over data once.
+                    # avoid creating a list, only iterate over data once
                     hotspots = sum(1 for gw in req['rxInfo'] if gw.get('metadata', {}).get('network') == 'helium_iot')
 
                     if req.get('data'):
@@ -298,7 +279,7 @@ async def redis_events_streams():
                         print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
                         await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
                     else:
-                        # blank uplink data cost * hotspots seen
+                        # blank uplink data cost 1 DC * hotspots seen
                         print('Tenant:', tenant_name, 'Device:', device_name)
                         print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
                         await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
@@ -316,10 +297,11 @@ async def redis_events_streams():
 
 
 async def main():
-    # create sqlite db and tables if not exist
+    # create sqlite db and tables if not exists
     await database.create_tables()
     # handle initial sync of skfs for devices on start
     await first_sync_session_keys()
+    # short sleep before init async tasks.
     await asyncio.sleep(2)
 
     tasks = [
@@ -330,6 +312,5 @@ async def main():
         # async_run_every(first_sync_session_keys, 600)
     ]
     await asyncio.gather(*tasks)
-
 
 asyncio.run(main())
