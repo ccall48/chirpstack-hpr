@@ -1,5 +1,5 @@
 # pull official python image
-FROM python:3.12-alpine
+FROM python:3.13-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
