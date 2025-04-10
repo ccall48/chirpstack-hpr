@@ -47,7 +47,6 @@ class DeviceDatabase:
             )""")
 
     async def upsert_device(self, kwargs):
-        # device = GetDeviceSyncRequest(**kwargs)
         sql = """
             INSERT INTO devices
             (devEui, name, isDisabled, variables, tags, joinEui, devAddr, nwkKey, appSKey, nwkSEncKey, routeId)
@@ -143,15 +142,6 @@ class DeviceDatabase:
                 await db.commit()
         return skfs_to_remove
 
-#    async def purge_stale_skfs(self):
-#        sql = """
-#            DELETE FROM helium_skfs
-#            WHERE sessionKey NOT IN (SELECT nwkSEncKey FROM devices);
-#        """
-#        async with aiosqlite.connect(self.database) as db:
-#            await db.execute(sql)
-#            await db.commit()
-
 
 """
 devEui=3240324265253275232
@@ -166,7 +156,6 @@ nwkSEncKey='e5e9c6b47880087d9b3a5f21b495031d'
 
 
 CREATE TABLE IF NOT EXISTS devices (
-    -- id INTEGER PRIMARY KEY AUTOINCREMENT,
     devEui INT PRIMARY KEY,         -- 3240324265253275232
     name TEXT,                      -- 'T1000A-iZincit'
     isDisabled NUMERIC NOT NULL,    -- False
