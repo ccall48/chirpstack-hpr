@@ -1,30 +1,21 @@
 import re
-# from uuid import UUID
 from pydantic import (
     AliasChoices,
-    # Base64Str,
     BaseModel,
-    # ConfigDict,
-    # UUID1,
     UUID4,
     Field,
-    # Json,
-    # constr,
-    # ValidationError,
     field_validator,
 )
 from typing import (
-    # Annotated,
     Optional,
-    # List,
     Dict,
 )
 from typing_extensions import (
     TypedDict,
-    # NotRequired,
 )
 
 
+# Regex to check for valid hexadecimal number
 HEXCHECK = re.compile(r'^[0-9a-fA-F]+$')
 
 
@@ -107,17 +98,7 @@ class GetRouteEuisList(BaseModel):
 
 
 class GetRouteSkfsList(BaseModel):
-    routeId: str  # UUID
+    routeId: str
     devaddr: int
     sessionKey: str
     maxCopies: Optional[int] = Field(default=0)
-
-    # @field_validator('devaddr')
-    # def int_to_hex(cls, v):
-    #     return hex(v)[2:]
-
-    # @field_validator('sessionKey')
-    # def hex_value_check(cls, v):
-    #     if HEXCHECK.match(v) is None:
-    #         raise ValueError(f'hex value required for sessionKey got: {v}')
-    #     return v
