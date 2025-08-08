@@ -6,7 +6,7 @@ googleapis-common-protos
 grpcio
 grpclib
 helium_py
-protobuf==5.29.4
+protobuf
 pydantic
 pydantic-extra-types
 PyNaCl
