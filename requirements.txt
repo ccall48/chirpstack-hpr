@@ -1,4 +1,5 @@
 aiosqlite
+aiosqlitepool
 base58
 betterproto
 chirpstack_api
