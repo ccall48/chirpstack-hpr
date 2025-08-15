@@ -1,9 +1,12 @@
 # project ignore, directories and sqlite databases
 *.sqlite
 *.db
+*.bak
+*.orig
 app/*.sqlite
 app/*.db
 app/testing/*
+app/*.bin
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
