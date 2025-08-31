@@ -9,7 +9,6 @@ services:
       - '${HELIUM_KEYPAIR_PATH}:/app/delegate_key.bin:ro'
     environment:
       - HELIUM_CONFIG_HOST=${HELIUM_CONFIG_HOST}
-      - HELIUM_CLI_PATH=/usr/local/bin/hpr
       - HELIUM_KEYPAIR_BIN=/app/delegate_key.bin
       - HELIUM_NET_ID=${HELIUM_NET_ID}
       - HELIUM_OUI=${HELIUM_OUI}
@@ -46,5 +45,5 @@ services:
 
 networks:
   default:
-    name: core-infra
+    name: helium-iot-net
     external: true
