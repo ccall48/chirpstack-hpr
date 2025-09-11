@@ -27,7 +27,7 @@ class HeliumConfigCli:
         self.delegate_key = r'/app/delegate_key.bin'
 
         with open(self.delegate_key, 'rb') as f:
-            skey = f.read()[1:]
+            skey = f.read()[1:65]
             self.delegate_keypair = Keypair(
                 SodiumKeyPair(
                     sk=skey,
