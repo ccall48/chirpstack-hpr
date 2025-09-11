@@ -88,7 +88,7 @@ class DeviceDatabase:
             VALUES (:tenantId, :tenantName, :dc_used)
             ON CONFLICT(tenantId) DO UPDATE
             SET tenantName=:tenantName,
-                dc_balance = dc_balance - :dc_used,
+                dc_balance = dc_balance - (dc_multiplier * :dc_used),
                 dc_used = dc_used + :dc_used
         """
         try:
