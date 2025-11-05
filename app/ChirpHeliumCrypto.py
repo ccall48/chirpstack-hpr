@@ -22,7 +22,7 @@ route_id = os.getenv('ROUTE_ID', None)
 delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
 
 with open(delegate_key, 'rb') as f:
-    skey = f.read()[1:]
+    skey = f.read()[1:65]
     delegate_keypair = Keypair(
         SodiumKeyPair(
             sk=skey,
