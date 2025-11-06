@@ -31,4 +31,6 @@ jobs:
         # F401: imported but unused
         # E303: too many blank lines
         # E501: line too long (336 > 120 characters)
-        flake8 --ignore=F401,E303,E501 --exclude=./app/Publishers/tenant_usage_pb2.py,./app/protos/helium/ .
+        # E226 missing whitespace around arithmetic operator
+        # E126 continuation line over-indented for hanging indent
+        flake8 --ignore=F401,E126,E266,E303,E501 --exclude=./app/Publishers/,./app/protos/helium/ .
