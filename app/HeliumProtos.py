@@ -66,7 +66,7 @@ class HeliumConfigCli:
             )
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             resp = await service.update_euis([req])
-        print(json.dumps(resp.to_dict(), indent=2))
+        print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         return
 
     async def route_skfs(self, skfs_action: list):
@@ -92,7 +92,7 @@ class HeliumConfigCli:
             )
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             resp = await service.update_skfs(req)
-        print(json.dumps(resp.to_dict(), indent=2))
+        print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         return
 
     async def route_skfs_list(self) -> list[dict]:
@@ -107,7 +107,7 @@ class HeliumConfigCli:
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             all_skfs = []
             async for skfs in service.list_skfs(req):
-                d = GetRouteSkfsList(**skfs.to_dict())
+                d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
                 device = {
                     'routeId': d.routeId,
                     'devaddr': d.devaddr,
@@ -130,7 +130,7 @@ class HeliumConfigCli:
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             all_skfs = []
             async for skfs in service.list_skfs(req):
-                d = GetRouteSkfsList(**skfs.to_dict())
+                d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
                 device = {
                     'routeId': d.routeId,
                     'devaddr': d.devaddr,
@@ -169,11 +169,13 @@ class HeliumConfigCli:
         device = await get_device_data(meta['dev_eui'])
         d = GetDeviceSyncRequest(**device)
 
+        # If device privacy not set, assume false and full roaming
         is_private = d.variables.get('private', False)
 
         if d.isDisabled or is_private:
             # remove euis - action = 1
-            await self.route_euis(d.devEui, d.joinEui, 1)
+            action = 1
+            await self.route_euis(d.devEui, d.joinEui, action)
             # remove skfs
             skfs_to_remove = [
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
@@ -186,7 +188,8 @@ class HeliumConfigCli:
 
         elif not d.isDisabled:
             # add euis - action = 0
-            await self.route_euis(d.devEui, d.joinEui, 0)
+            action = 0
+            await self.route_euis(d.devEui, d.joinEui, action)
             # sync skfs with max_copies update
             skfs_to_update = [
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(

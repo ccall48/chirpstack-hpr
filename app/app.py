@@ -9,6 +9,7 @@ from chirpstack_api import integration, stream
 from dotenv import load_dotenv
 
 from models import DeviceDatabase
+from redis_models import DeviceRedis
 from protos.helium import iot_config
 from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
@@ -37,6 +38,7 @@ rpool = redis.ConnectionPool(host=redis_server, port=6379, db=0)
 rdb = redis.Redis(connection_pool=rpool, decode_responses=True)
 
 database = DeviceDatabase()
+deviceredis = DeviceRedis()
 hpr = HeliumConfigCli()
 
 
@@ -260,11 +262,12 @@ async def redis_events_streams():
                     msg = message[1][b'up']
                     pl = integration.UplinkEvent()
                     pl.ParseFromString(msg)
-                    req = MessageToDict(pl)
+                    req = MessageToDict(pl, always_print_fields_with_no_presence=True)
 
                     tenant_id = req['deviceInfo']['tenantId']
                     tenant_name = req['deviceInfo']['tenantName']
                     device_name = req['deviceInfo']['deviceName']
+                    # device_eui = req['deviceInfo']['devEui']
 
                     # avoid creating a list, only iterate over data once
                     hotspots = sum(1 for gw in req['rxInfo'] if gw.get('metadata', {}).get('network') == 'helium_iot')
@@ -277,12 +280,30 @@ async def redis_events_streams():
 
                         print('Tenant:', tenant_name, 'Device:', device_name)
                         print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
+                        # decouple sqlite tenant dc count to redis stream?
                         await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
+                        #
+                        await deviceredis.tenant_dc_stream({
+                            'tenant_id': tenant_id,
+                            'tenant_name': tenant_name,
+                            'device_name': device_name,
+                            # 'device_eui': device_eui,
+                            'dc_used': total_dc,
+                        })
                     else:
                         # blank uplink data cost 1 DC * hotspots seen
                         print('Tenant:', tenant_name, 'Device:', device_name)
                         print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
+                        # decouple sqlite tenant dc count to redis stream?
                         await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
+                        #
+                        await deviceredis.tenant_dc_stream({
+                            'tenant_id': tenant_id,
+                            'tenant_name': tenant_name,
+                            'device_name': device_name,
+                            # 'device_eui': device_eui,
+                            'dc_used': hotspots,
+                        })
 
                     print('^ ^ ^ ^ ^ ^ ^ DEVICE UPLINK EVENT ^ ^ ^ ^ ^ ^ ^')
 
