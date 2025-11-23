@@ -20,6 +20,14 @@ services:
       - REDIS_HOST=${REDIS_HOST}
     command: sh -c 'cd /app && python app.py'
 
+  redis-hpr-v2:
+    image: redis:8-alpine
+    container_name: redis-hpr-v2
+    restart: unless-stopped
+    command: redis-server --save 300 1 --save 60 100 --appendonly no
+    volumes:
+      - ./data:/data
+
 networks:
   default:
     name: core-infra

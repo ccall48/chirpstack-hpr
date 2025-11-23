@@ -15,4 +15,3 @@ python-dotenv
 redis
 SQLAlchemy
 xxhash
-
