@@ -22,7 +22,20 @@ route_id = os.getenv('ROUTE_ID', None)
 delegate_key = os.getenv('HELIUM_KEYPAIR_BIN', default=None)
 
 with open(delegate_key, 'rb') as f:
-    skey = f.read()[1:65]
+    blob = f.read()[:65]
+    key_net_and_type, skey = blob[0], blob[1:65]
+    KEY_TYPE_ED25519 = 1
+    if (key_net_and_type & 0x0f) != KEY_TYPE_ED25519:
+        # The Helium blockchain historically supported two
+        # different key types: Ed25519 and ECC Compact.
+        # ECC Compact requires different code, which we don't have
+        # at the moment.
+        warning = \
+            "Unsupported delegate private key type. Only Ed25519 " \
+            "keys are supported."
+        logging.error(warning)
+        raise Exception(warning)
+
     delegate_keypair = Keypair(
         SodiumKeyPair(
             sk=skey,
