@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import logging
 import nacl.bindings
 from helium_py.crypto.keypair import Keypair
 from helium_py.crypto.keypair import SodiumKeyPair
@@ -27,7 +28,20 @@ class HeliumConfigCli:
         self.delegate_key = r'/app/delegate_key.bin'
 
         with open(self.delegate_key, 'rb') as f:
-            skey = f.read()[1:65]
+            blob = f.read()[:65]
+            key_net_and_type, skey = blob[0], blob[1:65]
+            KEY_TYPE_ED25519 = 1
+            if (key_net_and_type & 0x0f) != KEY_TYPE_ED25519:
+                # The Helium blockchain historically supported two
+                # different key types: Ed25519 and ECC Compact.
+                # ECC Compact requires different code, which we don't have
+                # at the moment.
+                warning = \
+                    "Unsupported delegate private key type. Only Ed25519 " \
+                    "keys are supported."
+                logging.error(warning)
+                raise Exception(warning)
+
             self.delegate_keypair = Keypair(
                 SodiumKeyPair(
                     sk=skey,
@@ -35,8 +49,10 @@ class HeliumConfigCli:
                 )
             )
 
+
     def chunker(self, seq, size):
         return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
 
     async def route_euis(self, dev_eui: str, join_eui: str, action: bool):
         """ Example device euis update, pairs to be sent as integers
@@ -69,6 +85,7 @@ class HeliumConfigCli:
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         return
 
+
     async def route_skfs(self, skfs_action: list):
         """ Example of device session key update.
             skfs_action: list ->
@@ -95,6 +112,7 @@ class HeliumConfigCli:
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         return
 
+
     async def route_skfs_list(self) -> list[dict]:
         """get all skfs assicated with a helium route id"""
         async with Channel(self.helium_host, self.helium_port) as channel:
@@ -116,6 +134,7 @@ class HeliumConfigCli:
                 }
                 all_skfs.append(device)
         return all_skfs
+
 
     async def route_skfs_devaddr(self, devaddr) -> list[dict]:
         """get skfs assicated with a single devaddr"""
@@ -140,6 +159,7 @@ class HeliumConfigCli:
                 all_skfs.append(device)
         return all_skfs
 
+
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # add / remove device euis from HPR
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
@@ -149,11 +169,13 @@ class HeliumConfigCli:
         dev_eui, join_eui = await get_device_euis(device)
         return await self.route_euis(int(dev_eui, 16), int(join_eui, 16), action)
 
+
     async def remove_device_euis(self, meta):
         action = 1
         device = meta['dev_eui']
         dev_eui, join_eui = await self.database.get_device_euis(device)
         return await self.route_euis(dev_eui, join_eui, action)
+
 
     async def update_device(self, meta):
         """
@@ -200,6 +222,7 @@ class HeliumConfigCli:
                 )
             ]
             await self.route_skfs(skfs_to_update)
+
 
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # Purge stale skfs
