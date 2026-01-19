@@ -20,7 +20,7 @@ HEXCHECK = re.compile(r'^[0-9a-fA-F]+$')
 
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# CHIRPSTACK gRPC v4.11.0
+# CHIRPSTACK gRPC v4.15.0
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 class GetVariables(TypedDict, total=False):
     max_copies: int = Field(default=0)
