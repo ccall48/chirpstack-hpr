@@ -157,21 +157,21 @@ async def sync_session_keys():
 async def redis_events_streams():
     request_stream = 'api:stream:request'
     device_stream = 'device:stream:event'
-    lid_id = '0'
+    _id = '0'
 
     while True:
         try:
             resp = await rdb.xread(
                 streams={
-                    request_stream: lid_id,
-                    device_stream: lid_id,
+                    request_stream: _id,
+                    device_stream: _id,
                 },
                 count=1,
                 block=0
             )
 
             for message in resp[0][1]:
-                lid_id = message[0]
+                _id = message[0]
                 _grpc = message[1]
 
                 if b'request' in message[1]:
@@ -184,7 +184,7 @@ async def redis_events_streams():
                     pl.ParseFromString(msg)
                     req = MessageToDict(pl)
 
-                    if 'method' not in req.keys():
+                    if 'method' not in req:
                         continue
 
                     match req['service']:
