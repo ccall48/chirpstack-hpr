@@ -1,3 +1,4 @@
+from contextlib import closing
 from functools import wraps
 # import asyncpg
 import psycopg2
@@ -59,7 +60,7 @@ class ChirpDeviceKeys:
         self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
 
     def db_fetch(self, query: str):
-        with psycopg2.connect(self.postgres) as con:
+        with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(query)
                 return cur.fetchall()
@@ -68,28 +69,32 @@ class ChirpDeviceKeys:
         db = Database()
         await db.connect()
         assert db.pool
-
-        async with db.pool.acquire() as conn:
-            async with conn.transaction():
-                cur = await conn.fetch(query)
-        await db.close()
-        return cur
+        try:
+            async with db.pool.acquire() as conn:
+                async with conn.transaction():
+                    return await conn.fetch(query)
+        finally:
+            await db.close()
 
     def db_transaction(self, query: str):
-        with psycopg2.connect(self.postgres) as con:
+        with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor() as cur:
                 cur.execute(query)
+            con.commit()
 
     async def async_db_transaction(self, query: str):
         db = Database()
         await db.connect()
         assert db.pool
-        async with db.pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(query)
+        try:
+            async with db.pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(query)
+        finally:
+            await db.close()
 
     def fetch_all_devices(self) -> list[str]:
-        with psycopg2.connect(self.postgres) as con:
+        with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
                     """

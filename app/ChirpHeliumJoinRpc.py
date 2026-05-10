@@ -1,4 +1,5 @@
 import os
+from contextlib import closing
 import psycopg2
 import psycopg2.extras
 import redis.asyncio as redis
@@ -48,9 +49,10 @@ class ChirpstackJoins:
         self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
 
     def db_transaction(self, query: str):
-        with psycopg2.connect(self.postgres) as con:
+        with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor() as cur:
                 cur.execute(query)
+            con.commit()
 
     ###########################################################################
     # follow internal redis stream gRPC for actionable changes

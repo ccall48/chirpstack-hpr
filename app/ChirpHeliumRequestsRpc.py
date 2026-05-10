@@ -1,4 +1,5 @@
 import os
+from contextlib import closing
 from functools import wraps
 import psycopg2
 import psycopg2.extras
@@ -69,12 +70,13 @@ class ChirpstackStreams:
     # functions to handle helium device db transactions
     ###########################################################################
     def db_transaction(self, query):
-        with psycopg2.connect(self.postgres) as con:
+        with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor() as cur:
                 cur.execute(query)
+            con.commit()
 
     def db_fetch(self, query):
-        with psycopg2.connect(self.postgres) as con:
+        with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(query)
                 return cur.fetchall()
