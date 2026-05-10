@@ -58,6 +58,13 @@ class ChirpDeviceKeys:
             self.postgres = "%s?sslmode=%s" % (conn_str, self.pg_ssl_mode)
         self.cs_gprc = chirpstack_host
         self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
+        self._db: Database | None = None
+
+    async def _get_pool(self):
+        if self._db is None:
+            self._db = Database()
+            await self._db.connect()
+        return self._db.pool
 
     def db_fetch(self, query: str):
         with closing(psycopg2.connect(self.postgres)) as con:
@@ -66,15 +73,10 @@ class ChirpDeviceKeys:
                 return cur.fetchall()
 
     async def async_db_fetch(self, query: str):
-        db = Database()
-        await db.connect()
-        assert db.pool
-        try:
-            async with db.pool.acquire() as conn:
-                async with conn.transaction():
-                    return await conn.fetch(query)
-        finally:
-            await db.close()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                return await conn.fetch(query)
 
     def db_transaction(self, query: str):
         with closing(psycopg2.connect(self.postgres)) as con:
@@ -83,15 +85,10 @@ class ChirpDeviceKeys:
             con.commit()
 
     async def async_db_transaction(self, query: str):
-        db = Database()
-        await db.connect()
-        assert db.pool
-        try:
-            async with db.pool.acquire() as conn:
-                async with conn.transaction():
-                    await conn.execute(query)
-        finally:
-            await db.close()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(query)
 
     def fetch_all_devices(self) -> list[str]:
         with closing(psycopg2.connect(self.postgres)) as con:
