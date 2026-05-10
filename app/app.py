@@ -110,9 +110,12 @@ if __name__ == '__main__':
 
     client_streams.create_tables()
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.submit(async_wrapper, client_streams.api_stream_requests)
-        executor.submit(async_wrapper, events.device_stream_event)
-        executor.submit(tenant.stream_meta)
-        executor.submit(run_every, update_device_status, device_int)
-        executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
+    try:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.submit(async_wrapper, client_streams.api_stream_requests)
+            executor.submit(async_wrapper, events.device_stream_event)
+            executor.submit(tenant.stream_meta)
+            executor.submit(run_every, update_device_status, device_int)
+            executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
+    finally:
+        asyncio.run(client_keys.close())

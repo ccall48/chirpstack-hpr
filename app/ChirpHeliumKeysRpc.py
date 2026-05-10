@@ -66,6 +66,11 @@ class ChirpDeviceKeys:
             await self._db.connect()
         return self._db.pool
 
+    async def close(self):
+        if self._db is not None:
+            await self._db.close()
+            self._db = None
+
     def db_fetch(self, query: str):
         with closing(psycopg2.connect(self.postgres)) as con:
             with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
