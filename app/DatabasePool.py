@@ -15,7 +15,11 @@ class Database:
 
     async def connect(self) -> None:
         if self.pool is None:
-            self.pool = await asyncpg.create_pool(dsn=self.dsn)
+            self.pool = await asyncpg.create_pool(
+                dsn=self.dsn,
+                min_size=1,   # do not hold idle connections open
+                max_size=5,   # small ceiling; queries are short-lived
+            )
 
     async def close(self) -> None:
         if self.pool is not None:
