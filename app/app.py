@@ -2,7 +2,8 @@ import os
 import asyncio
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+
+from DatabasePool import Database
 from ChirpHeliumRequestsRpc import ChirpstackStreams
 from ChirpHeliumKeysRpc import ChirpDeviceKeys
 from ChirpHeliumTenant import ChirpstackTenant
@@ -12,110 +13,71 @@ from ChirpHeliumJoinRpc import ChirpstackJoins
 logging.basicConfig(level=logging.INFO)
 
 
-if __name__ == '__main__':
+def build_dsn() -> str:
+    user = os.getenv('POSTGRES_USER')
+    password = os.getenv('POSTGRES_PASS')
+    host = os.getenv('POSTGRES_HOST')
+    port = os.getenv('POSTGRES_PORT', 5432)
+    name = os.getenv('POSTGRES_DB')
+    ssl_mode = os.getenv('POSTGRES_SSL_MODE', 'allow')
+    dsn = f'postgresql://{user}:{password}@{host}:{port}/{name}'
+    return f'{dsn}?sslmode={ssl_mode}'
+
+
+async def run_periodically(coro_fn, interval: int, name: str):
+    """Run an async callable forever, every `interval` seconds."""
+    while True:
+        start = time.time()
+        try:
+            print(f'{time.ctime()} Executing: {name}, interval: {interval}s.')
+            await coro_fn()
+        except Exception as err:
+            print(f'{name} Error: {err}')
+        elapsed = time.time() - start
+        await asyncio.sleep(max(0, interval - elapsed))
+
+
+async def main():
     route_id = os.getenv('ROUTE_ID')
-    postgres_host = os.getenv('POSTGRES_HOST')
-    postgres_user = os.getenv('POSTGRES_USER')
-    postgres_pass = os.getenv('POSTGRES_PASS')
-    postgres_name = os.getenv('POSTGRES_DB')
-    postgres_port = os.getenv('POSTGRES_PORT', 5432)
-    postgres_ssl_mode = os.getenv('POSTGRES_SSL_MODE', 'allow')
     chirpstack_host = os.getenv('CHIRPSTACK_SERVER')
     chirpstack_token = os.getenv('CHIRPSTACK_APIKEY')
 
+    db = Database(build_dsn())
+    await db.connect()
+
     events = ChirpstackJoins(
-        route_id=route_id,
-        postgres_host=postgres_host,
-        postgres_user=postgres_user,
-        postgres_pass=postgres_pass,
-        postgres_name=postgres_name,
-        postgres_port=postgres_port,
-        postgres_ssl_mode=postgres_ssl_mode,
-        chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token,
-    )
-
+        route_id, db.pool, chirpstack_host, chirpstack_token)
     client_streams = ChirpstackStreams(
-        route_id=route_id,
-        postgres_host=postgres_host,
-        postgres_user=postgres_user,
-        postgres_pass=postgres_pass,
-        postgres_name=postgres_name,
-        postgres_port=postgres_port,
-        postgres_ssl_mode=postgres_ssl_mode,
-        chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token,
-    )
-
+        route_id, db.pool, chirpstack_host, chirpstack_token)
     client_keys = ChirpDeviceKeys(
-        route_id=route_id,
-        postgres_host=postgres_host,
-        postgres_user=postgres_user,
-        postgres_pass=postgres_pass,
-        postgres_name=postgres_name,
-        postgres_port=postgres_port,
-        postgres_ssl_mode=postgres_ssl_mode,
-        chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token,
-    )
-
+        route_id, db.pool, chirpstack_host, chirpstack_token)
     tenant = ChirpstackTenant(
-        route_id=route_id,
-        postgres_host=postgres_host,
-        postgres_user=postgres_user,
-        postgres_pass=postgres_pass,
-        postgres_name=postgres_name,
-        postgres_port=postgres_port,
-        postgres_ssl_mode=postgres_ssl_mode,
-        chirpstack_host=chirpstack_host,
-        chirpstack_token=chirpstack_token,
-    )
+        route_id, db.pool, chirpstack_host, chirpstack_token)
 
-    def run_every(fn: str, interval: int):
-        name = str(fn)
-        while True:
-            try:
-                start = time.time()
-                print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
-                fn()
-                stop = time.time()
-                time.sleep(interval - (stop - start))
-            except Exception as err:
-                print(f'{name} Error: {err}')
-                pass
-
-    def async_run_every(fn: str, interval: int):
-        name = str(fn)
-        while True:
-            try:
-                start = time.time()
-                print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
-                asyncio.run(fn())
-                stop = time.time()
-                time.sleep(interval - (stop - start))
-            except Exception as err:
-                print(f'{name} Error: {err}')
-                pass
-
-    def async_wrapper(corro):
-        return asyncio.run(corro())
-
-    def update_device_status():
-        updates = list(map(client_keys.get_merged_keys, client_keys.fetch_all_devices()))
+    async def update_device_status():
+        updates = []
+        for dev_eui in await client_keys.fetch_all_devices():
+            updates.append(await client_keys.get_merged_keys(dev_eui))
         print('\n'.join(updates))
-        return
 
     skfs_int = 60 * 5   # 5 minutes
     device_int = 60 * 5  # 5 minutes
 
-    client_streams.create_tables()
+    await client_streams.create_tables()
 
     try:
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            executor.submit(async_wrapper, client_streams.api_stream_requests)
-            executor.submit(async_wrapper, events.device_stream_event)
-            executor.submit(tenant.stream_meta)
-            executor.submit(run_every, update_device_status, device_int)
-            executor.submit(async_run_every, client_keys.helium_skfs_update, skfs_int)
+        await asyncio.gather(
+            client_streams.api_stream_requests(),
+            events.device_stream_event(),
+            tenant.stream_meta(),
+            run_periodically(update_device_status, device_int,
+                             'update_device_status'),
+            run_periodically(client_keys.helium_skfs_update, skfs_int,
+                             'helium_skfs_update'),
+        )
     finally:
-        asyncio.run(client_keys.close())
+        await db.close()
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
