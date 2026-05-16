@@ -1,8 +1,6 @@
 import os
-from contextlib import closing
-import psycopg2
-import psycopg2.extras
-import redis
+import asyncio
+import redis.asyncio as redis
 from math import ceil
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import stream
@@ -21,48 +19,31 @@ class ChirpstackTenant:
     def __init__(
         self,
         route_id: str,
-        postgres_host: str,
-        postgres_user: str,
-        postgres_pass: str,
-        postgres_name: str,
-        postgres_port: str,
-        postgres_ssl_mode: str,
+        pool,
         chirpstack_host: str,
         chirpstack_token: str,
     ):
         self.route_id = route_id
-        self.pg_host = postgres_host
-        self.pg_user = postgres_user
-        self.pg_pass = postgres_pass
-        self.pg_name = postgres_name
-        self.pg_port = postgres_port
-        self.pg_ssl_mode = postgres_ssl_mode
-        conn_str = f'postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}'
-        if self.pg_ssl_mode[0] != 'require':
-            self.postgres = conn_str
-        else:
-            self.postgres = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
+        self.pool = pool
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
-    def db_transaction(self, query):
-        with closing(psycopg2.connect(self.postgres)) as con:
-            with con.cursor() as cur:
-                cur.execute(query)
-            con.commit()
+    async def db_transaction(self, query):
+        async with self.pool.acquire() as con:
+            async with con.transaction():
+                await con.execute(query)
 
-    def db_fetch(self, query):
-        with closing(psycopg2.connect(self.postgres)) as con:
-            with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(query)
-                return cur.fetchall()
+    async def db_fetch(self, query):
+        async with self.pool.acquire() as con:
+            async with con.transaction():
+                return await con.fetch(query)
 
-    def stream_meta(self):
+    async def stream_meta(self):
         stream_key = 'stream:meta'
         last_id = '0'
-        try:
-            while True:
-                resp = rdb.xread({stream_key: last_id}, count=1, block=0)
+        while True:
+            try:
+                resp = await rdb.xread({stream_key: last_id}, count=1, block=0)
 
                 for message in resp[0][1]:
                     last_id = message[0]
@@ -72,14 +53,12 @@ class ChirpstackTenant:
                         pl = stream.meta_pb2.UplinkMeta()
                         pl.ParseFromString(b)
                         data = MessageToDict(pl)
-                        self.meta_up(data)
+                        await self.meta_up(data)
 
-        except Exception as exc:
-            print(f'Error: {exc}')
-            # log exception error here when adding logger
-            pass
+            except Exception as exc:
+                logging.info(f'stream_meta: {exc}')
 
-    def meta_up(self, data: dict):
+    async def meta_up(self, data: dict):
         dev_eui = data['devEui']
         dupes = len(data['rxInfo'])
         # dc = ceil(data['phyPayloadByteCount'] / 24)
@@ -97,7 +76,7 @@ class ChirpstackTenant:
         query = """
             UPDATE helium_devices SET dc_used = (dc_used + {}) WHERE dev_eui='{}';
         """.format(total_dc, dev_eui)
-        self.db_transaction(query)
+        await self.db_transaction(query)
 
         if os.getenv('PUBLISH_USAGE_EVENTS') == 'True':
             # First we get the tenant id for the device...
@@ -106,11 +85,16 @@ class ChirpstackTenant:
                 JOIN device ON application.id = device.application_id
                 WHERE device.dev_eui = decode('%s', 'hex');
             """ % dev_eui
-            result = self.db_fetch(query)
+            result = await self.db_fetch(query)
             tenant_id = None
             application_id = None
             for row in result:
                 tenant_id = row['tenant_id']
                 application_id = row['id']
-            publish_usage_event(dev_eui, tenant_id, application_id, total_dc)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                publish_usage_event,
+                dev_eui, tenant_id, application_id, total_dc,
+            )
         return
