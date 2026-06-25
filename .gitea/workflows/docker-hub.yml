@@ -7,7 +7,8 @@ on:
 
 jobs:
   docker:
-    runs-on: ubuntu-latest
+#    runs-on: ubuntu-latest  # will run on any runner with ubuntu-latest
+    runs-on: openlns-exclusive  # This ensures it ONLY runs on openlns-hpr-v2
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
