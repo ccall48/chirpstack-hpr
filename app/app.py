@@ -267,7 +267,7 @@ async def redis_events_streams():
                     tenant_id = req['deviceInfo']['tenantId']
                     tenant_name = req['deviceInfo']['tenantName']
                     device_name = req['deviceInfo']['deviceName']
-                    # device_eui = req['deviceInfo']['devEui']
+                    device_eui = req['deviceInfo']['devEui']
 
                     # avoid creating a list, only iterate over data once
                     hotspots = sum(1 for gw in req['rxInfo'] if gw.get('metadata', {}).get('network') == 'helium_iot')
@@ -287,7 +287,7 @@ async def redis_events_streams():
                             'tenant_id': tenant_id,
                             'tenant_name': tenant_name,
                             'device_name': device_name,
-                            # 'device_eui': device_eui,
+                            'device_eui': device_eui,
                             'dc_used': total_dc,
                         })
                     else:
