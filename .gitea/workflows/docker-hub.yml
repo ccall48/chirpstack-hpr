@@ -30,4 +30,5 @@ jobs:
           push: true
           tags: |
             ccall48/chirpstack-hpr-v2:latest
+            ccall48/chirpstack-hpr-v2:${{ gitea.run_number }}
             ccall48/chirpstack-hpr-v2:${{ gitea.sha }}
