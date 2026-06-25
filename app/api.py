@@ -1,4 +1,6 @@
 import os
+import asyncio
+from itertools import chain
 import grpc
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import api
@@ -112,6 +114,7 @@ async def get_device_data(dev_eui: str) -> dict:
     return a | b
 
 
+"""
 async def all_tenant_apps() -> list[str]:
     all_apps = []
     for app in await get_tenant_list():
@@ -121,8 +124,49 @@ async def all_tenant_apps() -> list[str]:
             continue
         all_apps += (x for x in apps)
     return all_apps
+"""
+
+"""
+async def all_tenant_apps() -> list[str]:
+    # Get all tenants first
+    tenants = await get_tenant_list()
+
+    # Create tasks for all tenants to run concurrently
+    tasks = [get_tennant_apps(app) for app in tenants]
+
+    # Gather all results concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Flatten the list of lists, filtering out None and exceptions
+    all_apps = [
+        app for result in results
+        if isinstance(result, list) and result is not None
+        for app in result
+    ]
+    return all_apps
+"""
 
 
+async def all_tenant_apps() -> list[str]:
+    tenants = await get_tenant_list()
+    if not tenants:
+        return []
+
+    # Run all tenant fetches concurrently
+    results = await asyncio.gather(
+        *(get_tennant_apps(app) for app in tenants),
+        return_exceptions=True
+    )
+
+    # Flatten and filter valid lists
+    return [
+        app for result in results
+        if isinstance(result, list)
+        for app in result
+    ]
+
+
+"""
 async def all_tenant_deveui() -> list[str]:
     all_dev_euis = []
     app_id = await all_tenant_apps()
@@ -133,3 +177,42 @@ async def all_tenant_deveui() -> list[str]:
             continue
         all_dev_euis += devices
     return all_dev_euis
+"""
+"""
+async def all_tenant_deveui() -> list[str]:
+    # Get all app IDs concurrently (using the optimized function above)
+    app_ids = await all_tenant_apps()
+
+    # Create tasks for all applications to run concurrently
+    tasks = [get_application_devices(app_id) for app_id in app_ids]
+
+    # Gather all results concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Flatten the list of lists, filtering out None and exceptions
+    all_dev_euis = [
+        dev_eui for result in results
+        if isinstance(result, list) and result is not None
+        for dev_eui in result
+    ]
+    return all_dev_euis
+"""
+
+
+async def all_tenant_deveui() -> list[str]:
+    app_ids = await all_tenant_apps()
+    if not app_ids:
+        return []
+
+    # Run all device fetches concurrently
+    results = await asyncio.gather(
+        *(get_application_devices(app_id) for app_id in app_ids),
+        return_exceptions=True
+    )
+
+    # Flatten and filter valid lists
+    return [
+        dev_eui for result in results
+        if isinstance(result, list)
+        for dev_eui in result
+    ]
