@@ -81,12 +81,16 @@ async def get_device_data(dev_eui: str) -> dict:
         "deviceProfileId": "abd8d5af-8d58-49ab-a420-a4ff028ba72b",
         "variables": {
             "ThingsBoardAccessToken": "PpG1jeVwwx6erVnSnF1c",
-            "max_copies": "10"
+            "max_copies": "10",     // optional...
+            "private": "false"      // optional...
         },
         "joinEui": "7c3b5e861683b000",
         "skipFcntCheck": false,
         "isDisabled": false,
-        "tags": {},
+        "tags": {
+            "max_copies": "10",     // optional...
+            "private": "false"      // optional...
+        },
         "devAddr": "780001e6",
         "appSKey": "f618237213154bb1886b2b5370bf4000",
         "nwkSEncKey": "badfa2746a9aa9f022534f941d373000",

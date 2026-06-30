@@ -27,13 +27,18 @@ class GetVariables(TypedDict, total=False):
     private: bool = Field(default=False)
 
 
+class GetTags(TypedDict, total=False):
+    max_copies: int = Field(default=0)
+    private: bool = Field(default=False)
+
+
 class GetDeviceSyncRequest(BaseModel):
     # # get device
     devEui: str
     name: str
     isDisabled: bool
     variables: GetVariables[Dict]
-    tags: Optional[Dict[str, str]] = {}
+    tags: GetTags[Dict]
     joinEui: str
     # # deviceActivated device portion
     devAddr: Optional[str] = Field(default=0)
@@ -43,6 +48,7 @@ class GetDeviceSyncRequest(BaseModel):
     nwkKey: Optional[str] = Field(default=0)
 
     @field_validator('devEui', 'joinEui', 'devAddr')
+    @classmethod
     def eui_hex_value_check(cls, v):
         """convert hexidecimal value to integer for helium rpc"""
         if HEXCHECK.match(v) is None:
@@ -61,6 +67,7 @@ class GetDeviceRequest(BaseModel):
     joinEui: str
 
     @field_validator('devEui', 'joinEui')
+    @classmethod
     def eui_hex_value_check(cls, v):
         """convert hexidecimal value to integer"""
         if HEXCHECK.match(v) is None:
@@ -75,6 +82,7 @@ class GetDeviceActivation(BaseModel):
     nwkSEncKey: str
 
     @field_validator('devEui', 'devAddr')
+    @classmethod
     def eui_hex_value_check(cls, v):
         """convert hexidecimal value to integer"""
         if HEXCHECK.match(v) is None:
@@ -92,6 +100,7 @@ class GetRouteEuisList(BaseModel):
     devEui: int
 
     @field_validator('joinEui', 'devEui')
+    @classmethod
     def hex_value_check(cls, to_hex):
         """convert integer value to hexidecimal"""
         return hex(to_hex)[2:]

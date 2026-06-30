@@ -192,7 +192,16 @@ class HeliumConfigCli:
         d = GetDeviceSyncRequest(**device)
 
         # If device privacy not set, assume false and full roaming
-        is_private = d.variables.get('private', False)
+        # set device private in variables or tags, use tags over variables if both set.
+        is_private = (
+            d.tags['private'] if ('private' in d.variables and 'private' in d.tags)
+            else d.tags.get('private', False) or d.variables.get('private', False)
+        )
+        # set max_copies in variables or tags, use tags over variables if both set.
+        max_copies = (
+            d.tags['max_copies'] if ('max_copies' in d.tags and 'max_copies' in d.variables)
+            else d.tags.get('max_copies', 0) or d.variables.get('max_copies', 0)
+        )
 
         if d.isDisabled or is_private:
             # remove euis - action = 1
@@ -218,7 +227,7 @@ class HeliumConfigCli:
                     devaddr=d.devAddr,
                     session_key=d.nwkSEncKey,
                     action=iot_config.ActionV1(0),
-                    max_copies=d.variables.get('max_copies', 0)
+                    max_copies=max_copies
                 )
             ]
             await self.route_skfs(skfs_to_update)
