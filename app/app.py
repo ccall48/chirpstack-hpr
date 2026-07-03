@@ -107,17 +107,8 @@ async def first_sync_session_keys():
         device = await get_device_data(dev_eui)
         d = GetDeviceSyncRequest(**device)
 
-        # set device private in tags or variables, use tags in precedence if both set.
-        is_private = (
-            d.tags['private'] if ('private' in d.tags and 'private' in d.variables)
-            else d.tags.get('private', False) or d.variables.get('private', False)
-        )
-
-        # set max_copies in tags or variables, use tags in precedence if both set.
-        max_copies = (
-            d.tags['max_copies'] if ('max_copies' in d.tags and 'max_copies' in d.variables)
-            else d.tags.get('max_copies', 0) or d.variables.get('max_copies', 0)
-        )
+        is_private = d.is_private
+        max_copies = d.max_copies
 
         if not d.nwkSEncKey:
             # skip if device does not have a skfs or joined yet.
@@ -242,14 +233,8 @@ async def redis_events_streams():
                     #
                     # PRIVATE & MAX COPIES UPDATE HERE!
                     #
-                    is_private = (
-                        d.tags['private'] if ('private' in d.tags and 'private' in d.variables)
-                        else d.tags.get('private', False) or d.variables.get('private', False)
-                    )
-                    max_copies = (
-                        d.tags['max_copies'] if ('max_copies' in d.tags and 'max_copies' in d.variables)
-                        else d.tags.get('max_copies', 0) or d.variables.get('max_copies', 0)
-                    )
+                    is_private = d.is_private
+                    max_copies = d.max_copies
 
                     if is_private:
                         # if device is private, do not sync with hpr.

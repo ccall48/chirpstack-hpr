@@ -1,10 +1,11 @@
+import os
 import aiosqlite
 from aiosqlitepool import SQLiteConnectionPool
 
 
 class DeviceDatabase:
     def __init__(self):
-        self.database = 'chirpstack-hpr-v2j.db'
+        self.database = os.getenv('SQLITE_DATABASE_NAME', 'chirpstack-hpr-v2.db')
         self.pool: SQLiteConnectionPool = None
 
 

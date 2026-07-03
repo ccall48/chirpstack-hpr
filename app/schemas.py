@@ -55,6 +55,16 @@ class GetDeviceSyncRequest(BaseModel):
             raise ValueError(f'hex value required got: {v}')
         return int(v, 16)
 
+    @property
+    def is_private(self) -> bool:
+        """device private flag, tags take precedence over variables when both are set"""
+        return self.tags['private'] if 'private' in self.tags else self.variables.get('private', False)
+
+    @property
+    def max_copies(self) -> int:
+        """device max_copies, tags take precedence over variables when both are set"""
+        return self.tags['max_copies'] if 'max_copies' in self.tags else self.variables.get('max_copies', 0)
+
 
 class GetDeviceRequest(BaseModel):
     devEui: str
