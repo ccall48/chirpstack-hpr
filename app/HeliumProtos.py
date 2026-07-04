@@ -110,6 +110,7 @@ class HeliumConfigCli:
             req.signature = self.delegate_keypair.sign(req.SerializeToString())
             resp = await service.update_skfs(req)
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
+        print('^ ============ ^ SESSION KEY -> HPR SYNC ^ ============ ^')
         return
 
 
@@ -232,7 +233,7 @@ class HeliumConfigCli:
         stale_skfs_list = await self.database.get_stale_skfs()
         skfs_to_remove = []
         for skfs in stale_skfs_list:
-            print(f'  removing stale skfs: devaddr={skfs["DevAddr"]} session_key={skfs["sessionKey"]}')
+            print(f'>>> removing stale skfs: devaddr={skfs["DevAddr"]} session_key={skfs["sessionKey"]}')
 
             skfs_to_remove.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(

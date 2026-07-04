@@ -206,14 +206,10 @@ async def redis_events_streams():
 
                 if b'join' in message[1]:
                     msg = message[1][b'join']
-                    print(msg)
                     pl = integration.JoinEvent()
                     pl.ParseFromString(msg)
                     dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
-                    print(f'JOIN DEV_EUI: {dev_eui}')
-                    print('- - - - - -')
                     activate = await get_device_data(dev_eui, use_cache=False)
-                    print(activate)
                     d = GetDeviceSyncRequest(**activate)
                     device = [(
                         str(d.devEui),
@@ -228,9 +224,8 @@ async def redis_events_streams():
                         str(d.nwkSEncKey),
                         route_id
                     )]
-                    print('=====>')
-                    print(device)
                     await database.upsert_device(device)
+                    print(f'JOIN REQUEST\nName={d.name}\nDevEui={hex(d.devEui)[2:]}\nSessionKey={d.nwkSEncKey}\nDevAddr={hex(d.devAddr)[2:]}')
                     #
                     # PRIVATE & MAX COPIES UPDATE HERE!
                     #
@@ -310,15 +305,14 @@ async def redis_events_streams():
                             'dc_used': hotspots,
                         })
 
-                    print('^ ^ ^ ^ ^ ^ ^ DEVICE UPLINK EVENT ^ ^ ^ ^ ^ ^ ^')
+                    print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
 
             await asyncio.sleep(0)
 
         except Exception as exc:
-            print('* * * * * * * * * v ERROR v * * * * * * * * *')
-            print(f'[Error]\n: {exc}')
-            print('[GRPC]\n', _grpc)
-            print('* * * * * * * * * ^ ERROR ^ * * * * * * * * *')
+            print(f'[Error]:\n {exc}')
+            print(f'[GRPC msg]:\n {_grpc}')
+            print('^ * * * * * * * * * * ^ ERROR ^ * * * * * * * * * * ^')
             pass
 
 
