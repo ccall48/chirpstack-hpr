@@ -58,19 +58,19 @@ async def async_run_every(func: str, interval: int):
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_helium_skfs():
     while True:
-        print('START HELIUM SKFS')
+        print(f'{time.ctime()} START HELIUM SKFS')
         skfs = await hpr.route_skfs_list()
-        # sleeping = sleep_time(3550, 3600, 5)
-        sleeping = sleep_time(300, 600, 5)
-        print(f'END HELIUM SKFS, SLEEPING: {sleeping} mins')
         # update synced helium skfs
         await database.upsert_helium_skfs(skfs)
+        # sleeping = sleep_time(3550, 3600, 5)
+        sleeping = sleep_time(300, 600, 5)
+        print(f'{time.ctime()} END HELIUM SKFS: synced {len(skfs)} skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
 async def devices_sync_upsert():
     while True:
-        print('START RUNNING SQLITE DB SYNC')
+        print(f'{time.ctime()} START RUNNING SQLITE DB SYNC')
         devices = []
         device_euis = await all_tenant_deveui()
         for dev_eui in device_euis:
@@ -93,13 +93,13 @@ async def devices_sync_upsert():
         await database.upsert_device(devices)
         # sleeping = sleep_time(3550, 3600, 5)
         sleeping = sleep_time(300, 600, 5)
-        print(f'END RUNNING SQLITE DB SYNC SLEEPING: {sleeping} mins')
+        print(f'{time.ctime()} END RUNNING SQLITE DB SYNC: synced {len(devices)} devices, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
 async def first_sync_session_keys():
     """Run first on start to ensure sync of all existing device session keys with hpr"""
-    print('START FIRST HELIUM SESSIONKEY SYNC')
+    print(f'{time.ctime()} START FIRST HELIUM SESSIONKEY SYNC')
     devices = []
     device_euis = await all_tenant_deveui()
     for dev_eui in device_euis:
@@ -140,16 +140,16 @@ async def first_sync_session_keys():
     for group in hpr.chunker(devices, 100):
         # use chunker to limit update to max 100 per request
         await hpr.route_skfs(group)
-    print('END FIRST HELIUM SESSIONKEY SYNC')
+    print(f'{time.ctime()} END FIRST HELIUM SESSIONKEY SYNC: {len(devices)} skfs updates queued')
 
 
 async def sync_session_keys():
     while True:
-        print('START RUNNING SKFS PURGE')
-        await hpr.remove_stale_skfs()
+        print(f'{time.ctime()} START RUNNING SKFS PURGE')
+        removed = await hpr.remove_stale_skfs()
         # sleeping = sleep_time(43150, 43200, 5)
         sleeping = sleep_time(300, 600, 5)
-        print(f'END RUNNING SKFS PURGE SLEEPING: {sleeping} mins')
+        print(f'{time.ctime()} END RUNNING SKFS PURGE: removed {removed} stale skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
@@ -159,6 +159,7 @@ async def redis_events_streams():
     _id = '0'
 
     while True:
+        _grpc = None
         try:
             resp = await rdb.xread(
                 streams={

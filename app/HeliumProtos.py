@@ -228,11 +228,11 @@ class HeliumConfigCli:
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # Purge stale skfs
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
-    async def remove_stale_skfs(self):
+    async def remove_stale_skfs(self) -> int:
         stale_skfs_list = await self.database.get_stale_skfs()
         skfs_to_remove = []
         for skfs in stale_skfs_list:
-            print(int(skfs['DevAddr']), skfs['sessionKey'])
+            print(f'  removing stale skfs: devaddr={skfs["DevAddr"]} session_key={skfs["sessionKey"]}')
 
             skfs_to_remove.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
@@ -246,3 +246,5 @@ class HeliumConfigCli:
             # use chunker to limit update to max 100 per request
             for group in self.chunker(skfs_to_remove, 100):
                 await self.route_skfs(group)
+
+        return len(skfs_to_remove)
