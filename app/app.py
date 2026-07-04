@@ -211,7 +211,7 @@ async def redis_events_streams():
                     dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
                     print(f'JOIN DEV_EUI: {dev_eui}')
                     print('- - - - - -')
-                    activate = await get_device_data(dev_eui)
+                    activate = await get_device_data(dev_eui, use_cache=False)
                     print(activate)
                     d = GetDeviceSyncRequest(**activate)
                     device = [(

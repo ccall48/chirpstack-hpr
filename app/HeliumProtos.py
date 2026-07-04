@@ -188,7 +188,7 @@ class HeliumConfigCli:
             }
         }
         """
-        device = await get_device_data(meta['dev_eui'])
+        device = await get_device_data(meta['dev_eui'], use_cache=False)
         d = GetDeviceSyncRequest(**device)
 
         # If device privacy not set, assume false and full roaming

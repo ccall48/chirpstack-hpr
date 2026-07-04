@@ -1,6 +1,8 @@
 import os
+import json
 import asyncio
 import grpc
+import redis.asyncio as redis
 from google.protobuf.json_format import MessageToDict
 from chirpstack_api import api
 from dotenv import load_dotenv
@@ -13,6 +15,18 @@ load_dotenv()
 CHIRPSTACK_HOST = os.getenv('CHIRPSTACK_SERVER')
 CHIRPSTACK_APIKEY = os.getenv('CHIRPSTACK_APIKEY')
 AUTH_TOKEN = [('authorization', f'Bearer {CHIRPSTACK_APIKEY}')]
+
+_redis = redis.Redis(
+    host=os.getenv('REDIS_HOST'),
+    port=6379,
+    db=0,
+    decode_responses=True,
+)
+# Short-lived cache to dedupe the guaranteed double-fetch of every device at
+# startup (first_sync_session_keys immediately followed by devices_sync_upsert's
+# first loop). Kept well below the sync interval so periodic syncs still see
+# fresh data; event-driven callers (join/update) bypass it with use_cache=False.
+DEVICE_DATA_CACHE_TTL = 30  # seconds
 
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
@@ -70,7 +84,7 @@ async def get_application_devices(application_id: str) -> list[str]:
     return
 
 
-async def get_device_data(dev_eui: str) -> dict:
+async def get_device_data(dev_eui: str, use_cache: bool = True) -> dict:
     """ example full output
     {
         "devEui": "2cf7f1c053800000",
@@ -102,6 +116,16 @@ async def get_device_data(dev_eui: str) -> dict:
         "appKey": "00000000000000000000000000000000"
         }
     """
+    cache_key = f'device_data:{dev_eui}'
+
+    if use_cache:
+        try:
+            cached = await _redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except redis.RedisError as e:
+            print('[Redis Error: get_device_data read]', e)
+
     async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
         client = api.DeviceServiceStub(channel)
         req = api.GetDeviceRequest()
@@ -111,8 +135,16 @@ async def get_device_data(dev_eui: str) -> dict:
         if b.get('deviceActivation'):
             b = b['deviceActivation']
             c = MessageToDict(await client.GetKeys(req, metadata=AUTH_TOKEN), True)['deviceKeys']
-            return a | b | c
-    return a | b
+            data = a | b | c
+        else:
+            data = a | b
+
+    try:
+        await _redis.set(cache_key, json.dumps(data), ex=DEVICE_DATA_CACHE_TTL)
+    except redis.RedisError as e:
+        print('[Redis Error: get_device_data write]', e)
+
+    return data
 
 
 async def all_tenant_apps() -> list[str]:
