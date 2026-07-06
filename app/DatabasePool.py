@@ -1,20 +1,27 @@
-import os
 import asyncpg
-import asyncio
 
 
 class Database:
+    """Holds a single asyncpg connection pool, shared across the app.
+
+    The pool is created once at startup (``connect``) and closed once at
+    shutdown (``close``). Callers acquire/release individual connections
+    from ``pool`` per transaction.
+    """
+
+    def __init__(self, dsn: str):
+        self.dsn = dsn
+        self.pool: asyncpg.Pool | None = None
+
     async def connect(self) -> None:
-        self.pool = await asyncpg.create_pool(
-            user=os.getenv('POSTGRES_USER', 'chirpstack'),
-            host=os.getenv('POSTGRES_HOST', 'chirpstack-postgres'),
-            port=os.getenv('POSTGRES_PORT', 5432),
-            database=os.getenv('POSTGRES_DB', 'chirpstack'),
-            password=os.getenv('POSTGRES_PASS', 'chirpstack'),
-            loop=asyncio.get_running_loop(),
-        )
+        if self.pool is None:
+            self.pool = await asyncpg.create_pool(
+                dsn=self.dsn,
+                min_size=1,   # do not hold idle connections open
+                max_size=5,   # small ceiling; queries are short-lived
+            )
 
     async def close(self) -> None:
-        if self.pool:
+        if self.pool is not None:
             await self.pool.close()
-        pass
+            self.pool = None

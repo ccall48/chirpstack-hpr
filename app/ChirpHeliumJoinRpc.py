@@ -1,6 +1,4 @@
 import os
-import psycopg2
-import psycopg2.extras
 import redis.asyncio as redis
 import grpc
 from google.protobuf.json_format import MessageToJson, MessageToDict
@@ -23,34 +21,19 @@ class ChirpstackJoins:
     def __init__(
         self,
         route_id: str,
-        postgres_host: str,
-        postgres_user: str,
-        postgres_pass: str,
-        postgres_name: str,
-        postgres_port: str,
-        postgres_ssl_mode: str,
+        pool,
         chirpstack_host: str,
         chirpstack_token: str,
     ):
         self.route_id = route_id
-        self.pg_host = postgres_host
-        self.pg_user = postgres_user
-        self.pg_pass = postgres_pass
-        self.pg_name = postgres_name
-        self.pg_port = postgres_port
-        self.pg_ssl_mode = postgres_ssl_mode
-        conn_str = f"postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}"
-        if self.pg_ssl_mode[0] != "require":
-            self.postgres = conn_str
-        else:
-            self.postgres = "%s?sslmode=%s" % (conn_str, self.pg_ssl_mode)
+        self.pool = pool
         self.cs_grpc = chirpstack_host
         self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
 
-    def db_transaction(self, query: str):
-        with psycopg2.connect(self.postgres) as con:
-            with con.cursor() as cur:
-                cur.execute(query)
+    async def db_transaction(self, query: str):
+        async with self.pool.acquire() as con:
+            async with con.transaction():
+                await con.execute(query)
 
     ###########################################################################
     # follow internal redis stream gRPC for actionable changes
@@ -160,4 +143,4 @@ class ChirpstackJoins:
             devices["fCntUp"],
             devices["nFCntDown"],
         )
-        self.db_transaction(query)
+        await self.db_transaction(query)

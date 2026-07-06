@@ -1,7 +1,5 @@
 import os
 from functools import wraps
-import psycopg2
-import psycopg2.extras
 import redis.asyncio as redis
 import grpc
 from google.protobuf.json_format import MessageToJson, MessageToDict
@@ -41,50 +39,34 @@ class ChirpstackStreams:
     def __init__(
         self,
         route_id: str,
-        postgres_host: str,
-        postgres_user: str,
-        postgres_pass: str,
-        postgres_name: str,
-        postgres_port: str,
-        postgres_ssl_mode: str,
+        pool,
         chirpstack_host: str,
         chirpstack_token: str,
     ):
         self.route_id = route_id
-        self.pg_host = postgres_host
-        self.pg_user = postgres_user
-        self.pg_pass = postgres_pass
-        self.pg_name = postgres_name
-        self.pg_port = postgres_port
-        self.pg_ssl_mode = postgres_ssl_mode
-        conn_str = f'postgresql://{self.pg_user}:{self.pg_pass}@{self.pg_host}:{self.pg_port}/{self.pg_name}'
-        if self.pg_ssl_mode[0] != 'require':
-            self.postgres = conn_str
-        else:
-            self.postgres = '%s?sslmode=%s' % (conn_str, self.pg_ssl_mode)
+        self.pool = pool
         self.cs_gprc = chirpstack_host
         self.auth_token = [('authorization', f'Bearer {chirpstack_token}')]
 
     ###########################################################################
     # functions to handle helium device db transactions
     ###########################################################################
-    def db_transaction(self, query):
-        with psycopg2.connect(self.postgres) as con:
-            with con.cursor() as cur:
-                cur.execute(query)
+    async def db_transaction(self, query):
+        async with self.pool.acquire() as con:
+            async with con.transaction():
+                await con.execute(query)
 
-    def db_fetch(self, query):
-        with psycopg2.connect(self.postgres) as con:
-            with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(query)
-                return cur.fetchall()
+    async def db_fetch(self, query):
+        async with self.pool.acquire() as con:
+            async with con.transaction():
+                return await con.fetch(query)
 
-    def fetch_active_devices(self) -> list[str]:
+    async def fetch_active_devices(self) -> list[str]:
         query = "SELECT dev_eui FROM device WHERE is_disabled=false;"
-        result = [device['dev_eui'].hex() for device in self.db_fetch(query)]
+        result = [device['dev_eui'].hex() for device in await self.db_fetch(query)]
         return result
 
-    def create_tables(self):
+    async def create_tables(self):
         query = """
             CREATE TABLE IF NOT EXISTS helium_devices (
                 dev_eui text primary key,           -- devices['devEui']
@@ -101,7 +83,7 @@ class ChirpstackStreams:
             );
         """
         print('Run create helium device table if not exists.')
-        self.db_transaction(query)
+        await self.db_transaction(query)
 
     ###########################################################################
     # Chirpstack gRPC API calls
@@ -194,7 +176,7 @@ class ChirpstackStreams:
             VALUES ('{0}', '{1}')
             ON CONFLICT (dev_eui) DO NOTHING;
         """.format(dev_eui, join_eui)
-        self.db_transaction(query)
+        await self.db_transaction(query)
 
         await sync_device_euis(0, join_eui, dev_eui, self.route_id)
         return
@@ -214,7 +196,7 @@ class ChirpstackStreams:
         print(f'Remove Device: {device}')
 
         query = "SELECT * FROM helium_devices WHERE dev_eui='{}';".format(device)
-        data = self.db_fetch(query)[0]
+        data = (await self.db_fetch(query))[0]
 
         dev_eui = data['dev_eui']    # this should be a string
         join_eui = data['join_eui']  # this should be a string
@@ -229,7 +211,7 @@ class ChirpstackStreams:
         delete_device = """
             DELETE FROM helium_devices WHERE dev_eui='{}';
         """.format(device)
-        self.db_transaction(delete_device)
+        await self.db_transaction(delete_device)
         return
 
     @my_logger
@@ -253,14 +235,14 @@ class ChirpstackStreams:
             query = """
                 UPDATE helium_devices SET is_disabled=true WHERE dev_eui='{}';
             """.format(dev_eui)
-            self.db_transaction(query)
+            await self.db_transaction(query)
 
         elif is_disabled == 'false':
             action = 0
             query = """
                 UPDATE helium_devices SET is_disabled=false WHERE dev_eui='{}';
             """.format(dev_eui)
-            self.db_transaction(query)
+            await self.db_transaction(query)
         print('action', action, 'join', join_eui, 'dev', dev_eui)
         await sync_device_euis(action, join_eui, dev_eui, self.route_id)
         return
