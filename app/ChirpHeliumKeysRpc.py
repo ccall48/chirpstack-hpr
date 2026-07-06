@@ -23,7 +23,14 @@ class ChirpDeviceKeys:
     async def db_fetch(self, query: str):
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                return await conn.fetch(query)
+                cur = await conn.fetch(query)
+        await db.close()
+        return cur
+
+    def db_transaction(self, query: str, params=None):
+        with psycopg2.connect(self.postgres) as con:
+            with con.cursor() as cur:
+                cur.execute(query, params)
 
     async def db_transaction(self, query: str):
         async with self.pool.acquire() as conn:
@@ -86,28 +93,30 @@ class ChirpDeviceKeys:
         query = """
             INSERT INTO helium_devices
             (dev_eui, join_eui, dev_addr, max_copies, aps_key, nws_key, dev_name, fcnt_up, fcnt_down)
-            VALUES ('{0}', '{1}', '{2}', '{3}', '{4}', '{5}', '{6}', '{7}', '{8}')
+            VALUES (%(dev_eui)s, %(join_eui)s, %(dev_addr)s, %(max_copies)s, %(aps_key)s, %(nws_key)s, %(dev_name)s, %(fcnt_up)s, %(fcnt_down)s)
             ON CONFLICT (dev_eui) DO UPDATE
-            SET join_eui = '{1}',
-                dev_addr = '{2}',
-                max_copies = '{3}',
-                aps_key = '{4}',
-                nws_key = '{5}',
-                dev_name = '{6}',
-                fcnt_up = '{7}',
-                fcnt_down = '{8}';
-        """.format(
-            devices["devEui"],
-            devices["joinEui"],
-            devices["devAddr"],
-            max_copies,
-            devices["appSKey"],
-            devices["nwkSEncKey"],
-            devices["name"],
-            devices["fCntUp"],
-            devices["nFCntDown"],
-        )
-        await self.db_transaction(query)
+            SET join_eui = EXCLUDED.join_eui,
+                dev_addr = EXCLUDED.dev_addr,
+                max_copies = EXCLUDED.max_copies,
+                aps_key = EXCLUDED.aps_key,
+                nws_key = EXCLUDED.nws_key,
+                dev_name = EXCLUDED.dev_name,
+                fcnt_up = EXCLUDED.fcnt_up,
+                fcnt_down = EXCLUDED.fcnt_down;
+        """
+        params = {
+            "dev_eui": devices["devEui"],
+            "join_eui": devices["joinEui"],
+            "dev_addr": devices["devAddr"],
+            "max_copies": max_copies,
+            "aps_key": devices["appSKey"],
+            "nws_key": devices["nwkSEncKey"],
+            "dev_name": devices["name"],
+            "fcnt_up": devices["fCntUp"],
+            "fcnt_down": devices["nFCntDown"],
+        }
+        self.db_transaction(query, params)
+        # await self.async_db_transaction(query)
         return f"Updated: {dev_eui}"
 
     async def helium_skfs_update(self):
