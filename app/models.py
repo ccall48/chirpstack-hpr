@@ -87,7 +87,10 @@ class DeviceDatabase:
         sql = """
             INSERT INTO devices
             (devEui, name, isDisabled, variables, tags, joinEui, devAddr, nwkKey, appSKey, nwkSEncKey, routeId)
-            VALUES (:devEui, :name, :isDisabled, :variables, :tags, :joinEui, :devAddr, :nwkKey, :appSKey, :nwkSEncKey, :route_id)
+            VALUES (
+                :devEui, :name, :isDisabled, :variables, :tags,
+                :joinEui, :devAddr, :nwkKey, :appSKey, :nwkSEncKey, :route_id
+            )
             ON CONFLICT(devEui) DO UPDATE
             SET name=:name,
                 isDisabled=:isDisabled,

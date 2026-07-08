@@ -225,7 +225,7 @@ async def redis_events_streams():
                         route_id
                     )]
                     await database.upsert_device(device)
-                    print(f'JOIN REQUEST\nName={d.name}\nDevEui={hex(d.devEui)[2:]}\nSessionKey={d.nwkSEncKey}\nDevAddr={hex(d.devAddr)[2:]}')
+                    print(f'JOIN REQUEST\nName={d.name}\nDevEui={hex(d.devEui)[2:]}\nSessionKey={d.nwkSEncKey}\nDevAddr={hex(d.devAddr)[2:]}')  # noqa: E501
                     #
                     # PRIVATE & MAX COPIES UPDATE HERE!
                     #
