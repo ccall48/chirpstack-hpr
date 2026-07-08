@@ -42,4 +42,3 @@ class DeviceRedis:
             await self.r.xadd('tenant:stream', {'uplink': json.dumps(kwargs)}, maxlen=100_000)
         except redis.RedisError as e:
             print('[RHPR tenant_dc_stream: tenant Error]', e)
-

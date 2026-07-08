@@ -13,13 +13,8 @@ from redis_models import DeviceRedis
 from protos.helium import iot_config
 from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
-from helium_func import (
-    data_bytes_size,
-)
-from api import (
-    all_tenant_deveui,
-    get_device_data,
-)
+from helium_func import data_bytes_size
+from api import all_tenant_deveui, get_device_data
 
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
@@ -63,18 +58,19 @@ async def async_run_every(func: str, interval: int):
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_helium_skfs():
     while True:
-        print('START HELIUM SKFS')
+        print(f'{time.ctime()} START HELIUM SKFS')
         skfs = await hpr.route_skfs_list()
-        sleeping = sleep_time(3550, 3600, 5)
-        print(f'END HELIUM SKFS, SLEEPING: {sleeping} mins')
         # update synced helium skfs
         await database.upsert_helium_skfs(skfs)
+        # sleeping = sleep_time(3550, 3600, 5)
+        sleeping = sleep_time(300, 600, 5)
+        print(f'{time.ctime()} END HELIUM SKFS: synced {len(skfs)} skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
 async def devices_sync_upsert():
     while True:
-        print('START RUNNING SQLITE DB SYNC')
+        print(f'{time.ctime()} START RUNNING SQLITE DB SYNC')
         devices = []
         device_euis = await all_tenant_deveui()
         for dev_eui in device_euis:
@@ -86,7 +82,7 @@ async def devices_sync_upsert():
                 str(d.name),
                 str(d.isDisabled),
                 json.dumps(d.variables),
-                str(d.tags),
+                json.dumps(d.tags),
                 str(d.joinEui),
                 str(d.devAddr),
                 str(d.nwkKey),
@@ -95,22 +91,24 @@ async def devices_sync_upsert():
                 route_id,
             ))
         await database.upsert_device(devices)
-        sleeping = sleep_time(3550, 3600, 5)
-        print(f'END RUNNING SQLITE DB SYNC SLEEPING: {sleeping} mins')
+        # sleeping = sleep_time(3550, 3600, 5)
+        sleeping = sleep_time(300, 600, 5)
+        print(f'{time.ctime()} END RUNNING SQLITE DB SYNC: synced {len(devices)} devices, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
 async def first_sync_session_keys():
     """Run first on start to ensure sync of all existing device session keys with hpr"""
-    print('START FIRST HELIUM SESSIONKEY SYNC')
+    print(f'{time.ctime()} START FIRST HELIUM SESSIONKEY SYNC')
     devices = []
     device_euis = await all_tenant_deveui()
     for dev_eui in device_euis:
         # use api to collect device data
         device = await get_device_data(dev_eui)
         d = GetDeviceSyncRequest(**device)
-        is_private = d.variables.get('private', False)
-        max_copies = d.variables.get('max_copies', 0)
+
+        is_private = d.is_private
+        max_copies = d.max_copies
 
         if not d.nwkSEncKey:
             # skip if device does not have a skfs or joined yet.
@@ -118,7 +116,7 @@ async def first_sync_session_keys():
 
         if d.isDisabled or is_private:
             # remove skfs for a disabled or private device on inital sync.
-            print('Disabled', d.devEui, d.name)
+            print('Disabled ←', d.devEui, d.name)
             devices.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
                     devaddr=d.devAddr,
@@ -129,7 +127,7 @@ async def first_sync_session_keys():
             )
         else:
             # Sync enabled and roaming device skfs.
-            print('Enabled', d.devEui, d.name)
+            print('Enabled →', d.devEui, d.name)
             devices.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
                     devaddr=d.devAddr,
@@ -142,15 +140,16 @@ async def first_sync_session_keys():
     for group in hpr.chunker(devices, 100):
         # use chunker to limit update to max 100 per request
         await hpr.route_skfs(group)
-    print('END FIRST HELIUM SESSIONKEY SYNC')
+    print(f'{time.ctime()} END FIRST HELIUM SESSIONKEY SYNC: {len(devices)} skfs updates queued')
 
 
 async def sync_session_keys():
     while True:
-        print('START RUNNING SKFS PURGE')
-        await hpr.remove_stale_skfs()
-        sleeping = sleep_time(43150, 43200, 5)
-        print(f'END RUNNING SKFS PURGE SLEEPING: {sleeping} mins')
+        print(f'{time.ctime()} START RUNNING SKFS PURGE')
+        removed = await hpr.remove_stale_skfs()
+        # sleeping = sleep_time(43150, 43200, 5)
+        sleeping = sleep_time(300, 600, 5)
+        print(f'{time.ctime()} END RUNNING SKFS PURGE: removed {removed} stale skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
@@ -160,6 +159,7 @@ async def redis_events_streams():
     _id = '0'
 
     while True:
+        _grpc = None
         try:
             resp = await rdb.xread(
                 streams={
@@ -191,36 +191,32 @@ async def redis_events_streams():
                         case 'api.DeviceService':
                             if req['method'] == 'Create':
                                 print('========== API Create Euis ==========')
-                                print(MessageToJson(pl))
+                                print(MessageToJson(pl, always_print_fields_with_no_presence=True))
                                 await hpr.add_device_euis(req['metadata'])
 
                             if req['method'] == 'Delete':
                                 print('========== API Delete Euis ==========')
-                                print(MessageToJson(pl))
+                                print(MessageToJson(pl, always_print_fields_with_no_presence=True))
                                 await hpr.remove_device_euis(req['metadata'])
 
                             if req['method'] == 'Update':
                                 print('========== API Update Euis ==========')
-                                print(MessageToJson(pl))
+                                print(MessageToJson(pl, always_print_fields_with_no_presence=True))
                                 await hpr.update_device(req['metadata'])
 
                 if b'join' in message[1]:
                     msg = message[1][b'join']
-                    print(msg)
                     pl = integration.JoinEvent()
                     pl.ParseFromString(msg)
                     dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
-                    print(f'JOIN DEV_EUI: {dev_eui}')
-                    print('- - - - - -')
-                    activate = await get_device_data(dev_eui)
-                    print(activate)
+                    activate = await get_device_data(dev_eui, use_cache=False)
                     d = GetDeviceSyncRequest(**activate)
                     device = [(
                         str(d.devEui),
                         str(d.name),
                         str(d.isDisabled),
                         json.dumps(d.variables),
-                        str(d.tags),
+                        json.dumps(d.tags),
                         str(d.joinEui),
                         str(d.devAddr),
                         str(d.nwkKey),
@@ -228,11 +224,15 @@ async def redis_events_streams():
                         str(d.nwkSEncKey),
                         route_id
                     )]
-                    print('=====>')
-                    print(device)
                     await database.upsert_device(device)
+                    print(f'JOIN REQUEST\nName={d.name}\nDevEui={hex(d.devEui)[2:]}\nSessionKey={d.nwkSEncKey}\nDevAddr={hex(d.devAddr)[2:]}')  # noqa: E501
+                    #
+                    # PRIVATE & MAX COPIES UPDATE HERE!
+                    #
+                    is_private = d.is_private
+                    max_copies = d.max_copies
 
-                    if d.variables.get('private', False):
+                    if is_private:
                         # if device is private, do not sync with hpr.
                         sync_join_skfs = [
                             iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
@@ -241,7 +241,7 @@ async def redis_events_streams():
                                 # 0 add, 1 remove
                                 action=iot_config.ActionV1(1),
                                 # device max_copies if set, else 0 for default
-                                max_copies=d.variables.get('max_copies', 1)
+                                max_copies=max_copies
                             )
                         ]
                     else:
@@ -253,7 +253,7 @@ async def redis_events_streams():
                                 # 0 add, 1 remove
                                 action=iot_config.ActionV1(0),
                                 # set max_copies or 0 for default route amount
-                                max_copies=d.variables.get('max_copies', 0)
+                                max_copies=max_copies
                             )
                         ]
                     await hpr.route_skfs(sync_join_skfs)
@@ -301,19 +301,18 @@ async def redis_events_streams():
                             'tenant_id': tenant_id,
                             'tenant_name': tenant_name,
                             'device_name': device_name,
-                            # 'device_eui': device_eui,
+                            'device_eui': device_eui,
                             'dc_used': hotspots,
                         })
 
-                    print('^ ^ ^ ^ ^ ^ ^ DEVICE UPLINK EVENT ^ ^ ^ ^ ^ ^ ^')
+                    print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
 
             await asyncio.sleep(0)
 
         except Exception as exc:
-            print('* * * * * * * * * v ERROR v * * * * * * * * *')
-            print(f'[Error]\n: {exc}')
-            print('[GRPC]\n', _grpc)
-            print('* * * * * * * * * ^ ERROR ^ * * * * * * * * *')
+            print(f'[Error]:\n {exc}')
+            print(f'[GRPC msg]:\n {_grpc}')
+            print('^ * * * * * * * * * * ^ ERROR ^ * * * * * * * * * * ^')
             pass
 
 

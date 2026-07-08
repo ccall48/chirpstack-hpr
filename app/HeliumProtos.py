@@ -26,6 +26,11 @@ class HeliumConfigCli:
         self.route_id = os.getenv('ROUTE_ID', None)
         self.database = DeviceDatabase()
         self.delegate_key = r'/app/delegate_key.bin'
+        # Built lazily by _get_channel(), not here: Channel captures the
+        # event loop at construction time, and HeliumConfigCli() is
+        # instantiated at module import time in app.py, before
+        # asyncio.run(main()) starts the real loop.
+        self._channel = None
 
         with open(self.delegate_key, 'rb') as f:
             blob = f.read()[:65]
@@ -54,6 +59,18 @@ class HeliumConfigCli:
         return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
+    async def _get_channel(self) -> Channel:
+        if self._channel is None:
+            self._channel = Channel(self.helium_host, self.helium_port)
+        return self._channel
+
+
+    def close_channel(self):
+        """Call this once when the script shuts down."""
+        if self._channel is not None:
+            self._channel.close()
+
+
     async def route_euis(self, dev_eui: str, join_eui: str, action: bool):
         """ Example device euis update, pairs to be sent as integers
             euis_action: list ->
@@ -68,20 +85,20 @@ class HeliumConfigCli:
                 ...
             ]
         """
-        async with Channel(self.helium_host, self.helium_port) as channel:
-            service = iot_config.RouteStub(channel)
-            req = iot_config.RouteUpdateEuisReqV1(
-                action=iot_config.ActionV1(action),
-                eui_pair=iot_config.EuiPairV1(
-                    route_id=self.route_id,
-                    app_eui=join_eui,
-                    dev_eui=dev_eui,
-                ),
-                timestamp=int(time.time()),
-                signer=self.delegate_keypair.address.bin
-            )
-            req.signature = self.delegate_keypair.sign(req.SerializeToString())
-            resp = await service.update_euis([req])
+        channel = await self._get_channel()
+        service = iot_config.RouteStub(channel)
+        req = iot_config.RouteUpdateEuisReqV1(
+            action=iot_config.ActionV1(action),
+            eui_pair=iot_config.EuiPairV1(
+                route_id=self.route_id,
+                app_eui=join_eui,
+                dev_eui=dev_eui,
+            ),
+            timestamp=int(time.time()),
+            signer=self.delegate_keypair.address.bin
+        )
+        req.signature = self.delegate_keypair.sign(req.SerializeToString())
+        resp = await service.update_euis([req])
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         return
 
@@ -99,64 +116,65 @@ class HeliumConfigCli:
                 ...
             ]
         """
-        async with Channel(self.helium_host, self.helium_port) as channel:
-            service = iot_config.RouteStub(channel)
-            req = iot_config.RouteSkfUpdateReqV1(
-                route_id=self.route_id,
-                updates=skfs_action,
-                timestamp=int(time.time()),
-                signer=self.delegate_keypair.address.bin
-            )
-            req.signature = self.delegate_keypair.sign(req.SerializeToString())
-            resp = await service.update_skfs(req)
+        channel = await self._get_channel()
+        service = iot_config.RouteStub(channel)
+        req = iot_config.RouteSkfUpdateReqV1(
+            route_id=self.route_id,
+            updates=skfs_action,
+            timestamp=int(time.time()),
+            signer=self.delegate_keypair.address.bin
+        )
+        req.signature = self.delegate_keypair.sign(req.SerializeToString())
+        resp = await service.update_skfs(req)
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
+        print('^ ============ ^ SESSION KEY -> HPR SYNC ^ ============ ^')
         return
 
 
     async def route_skfs_list(self) -> list[dict]:
         """get all skfs assicated with a helium route id"""
-        async with Channel(self.helium_host, self.helium_port) as channel:
-            service = iot_config.RouteStub(channel)
-            req = iot_config.RouteSkfListReqV1(
-                route_id=self.route_id,
-                timestamp=int(time.time()),
-                signer=self.delegate_keypair.address.bin
-            )
-            req.signature = self.delegate_keypair.sign(req.SerializeToString())
-            all_skfs = []
-            async for skfs in service.list_skfs(req):
-                d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
-                device = {
-                    'routeId': d.routeId,
-                    'devaddr': d.devaddr,
-                    'sessionKey': d.sessionKey,
-                    'maxCopies': d.maxCopies
-                }
-                all_skfs.append(device)
+        channel = await self._get_channel()
+        service = iot_config.RouteStub(channel)
+        req = iot_config.RouteSkfListReqV1(
+            route_id=self.route_id,
+            timestamp=int(time.time()),
+            signer=self.delegate_keypair.address.bin
+        )
+        req.signature = self.delegate_keypair.sign(req.SerializeToString())
+        all_skfs = []
+        async for skfs in service.list_skfs(req):
+            d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
+            device = {
+                'routeId': d.routeId,
+                'devaddr': d.devaddr,
+                'sessionKey': d.sessionKey,
+                'maxCopies': d.maxCopies
+            }
+            all_skfs.append(device)
         return all_skfs
 
 
     async def route_skfs_devaddr(self, devaddr) -> list[dict]:
         """get skfs assicated with a single devaddr"""
-        async with Channel(self.helium_host, self.helium_port) as channel:
-            service = iot_config.RouteStub(channel)
-            req = iot_config.RouteSkfGetReqV1(
-                route_id=self.route_id,
-                devaddr=devaddr,
-                timestamp=int(time.time()),
-                signer=self.delegate_keypair.address.bin
-            )
-            req.signature = self.delegate_keypair.sign(req.SerializeToString())
-            all_skfs = []
-            async for skfs in service.list_skfs(req):
-                d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
-                device = {
-                    'routeId': d.routeId,
-                    'devaddr': d.devaddr,
-                    'sessionKey': d.sessionKey,
-                    'maxCopies': d.maxCopies
-                }
-                all_skfs.append(device)
+        channel = await self._get_channel()
+        service = iot_config.RouteStub(channel)
+        req = iot_config.RouteSkfGetReqV1(
+            route_id=self.route_id,
+            devaddr=devaddr,
+            timestamp=int(time.time()),
+            signer=self.delegate_keypair.address.bin
+        )
+        req.signature = self.delegate_keypair.sign(req.SerializeToString())
+        all_skfs = []
+        async for skfs in service.list_skfs(req):
+            d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
+            device = {
+                'routeId': d.routeId,
+                'devaddr': d.devaddr,
+                'sessionKey': d.sessionKey,
+                'maxCopies': d.maxCopies
+            }
+            all_skfs.append(device)
         return all_skfs
 
 
@@ -188,11 +206,12 @@ class HeliumConfigCli:
             }
         }
         """
-        device = await get_device_data(meta['dev_eui'])
+        device = await get_device_data(meta['dev_eui'], use_cache=False)
         d = GetDeviceSyncRequest(**device)
 
         # If device privacy not set, assume false and full roaming
-        is_private = d.variables.get('private', False)
+        is_private = d.is_private
+        max_copies = d.max_copies
 
         if d.isDisabled or is_private:
             # remove euis - action = 1
@@ -218,7 +237,7 @@ class HeliumConfigCli:
                     devaddr=d.devAddr,
                     session_key=d.nwkSEncKey,
                     action=iot_config.ActionV1(0),
-                    max_copies=d.variables.get('max_copies', 0)
+                    max_copies=max_copies
                 )
             ]
             await self.route_skfs(skfs_to_update)
@@ -227,11 +246,11 @@ class HeliumConfigCli:
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # Purge stale skfs
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
-    async def remove_stale_skfs(self):
+    async def remove_stale_skfs(self) -> int:
         stale_skfs_list = await self.database.get_stale_skfs()
         skfs_to_remove = []
         for skfs in stale_skfs_list:
-            print(int(skfs['DevAddr']), skfs['sessionKey'])
+            print(f'>>> removing stale skfs: devaddr={skfs["DevAddr"]} session_key={skfs["sessionKey"]}')
 
             skfs_to_remove.append(
                 iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
@@ -245,3 +264,5 @@ class HeliumConfigCli:
             # use chunker to limit update to max 100 per request
             for group in self.chunker(skfs_to_remove, 100):
                 await self.route_skfs(group)
+
+        return len(skfs_to_remove)

@@ -1,0 +1,4 @@
+[flake8]
+max-line-length = 120
+exclude = app/protos
+extend-ignore = E301,E303

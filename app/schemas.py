@@ -27,13 +27,18 @@ class GetVariables(TypedDict, total=False):
     private: bool = Field(default=False)
 
 
+class GetTags(TypedDict, total=False):
+    max_copies: int = Field(default=0)
+    private: bool = Field(default=False)
+
+
 class GetDeviceSyncRequest(BaseModel):
     # # get device
     devEui: str
     name: str
     isDisabled: bool
     variables: GetVariables[Dict]
-    tags: Optional[Dict[str, str]] = {}
+    tags: GetTags[Dict]
     joinEui: str
     # # deviceActivated device portion
     devAddr: Optional[str] = Field(default=0)
@@ -43,11 +48,22 @@ class GetDeviceSyncRequest(BaseModel):
     nwkKey: Optional[str] = Field(default=0)
 
     @field_validator('devEui', 'joinEui', 'devAddr')
+    @classmethod
     def eui_hex_value_check(cls, v):
         """convert hexidecimal value to integer for helium rpc"""
         if HEXCHECK.match(v) is None:
             raise ValueError(f'hex value required got: {v}')
         return int(v, 16)
+
+    @property
+    def is_private(self) -> bool:
+        """device private flag, tags take precedence over variables when both are set"""
+        return self.tags['private'] if 'private' in self.tags else self.variables.get('private', False)
+
+    @property
+    def max_copies(self) -> int:
+        """device max_copies, tags take precedence over variables when both are set"""
+        return self.tags['max_copies'] if 'max_copies' in self.tags else self.variables.get('max_copies', 0)
 
 
 class GetDeviceRequest(BaseModel):
@@ -61,6 +77,7 @@ class GetDeviceRequest(BaseModel):
     joinEui: str
 
     @field_validator('devEui', 'joinEui')
+    @classmethod
     def eui_hex_value_check(cls, v):
         """convert hexidecimal value to integer"""
         if HEXCHECK.match(v) is None:
@@ -75,6 +92,7 @@ class GetDeviceActivation(BaseModel):
     nwkSEncKey: str
 
     @field_validator('devEui', 'devAddr')
+    @classmethod
     def eui_hex_value_check(cls, v):
         """convert hexidecimal value to integer"""
         if HEXCHECK.match(v) is None:
@@ -92,6 +110,7 @@ class GetRouteEuisList(BaseModel):
     devEui: int
 
     @field_validator('joinEui', 'devEui')
+    @classmethod
     def hex_value_check(cls, to_hex):
         """convert integer value to hexidecimal"""
         return hex(to_hex)[2:]
