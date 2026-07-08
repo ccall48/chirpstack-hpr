@@ -4,6 +4,8 @@ on:
   push:
     branches:
         - master
+    tags:
+        - '*'
 
 jobs:
   docker:
@@ -23,11 +25,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      # tag pushes (refs/tags/*) get an image tagged with the tag name + latest,
+      # plain pushes to master keep the old latest + commit-sha tags
+      - name: Set image tags
+        id: image_tags
+        run: |
+          if [[ "${{ gitea.ref }}" == refs/tags/* ]]; then
+            echo "tags=ccall48/chirpstack-hpr-v2:${{ gitea.ref_name }},ccall48/chirpstack-hpr-v2:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=ccall48/chirpstack-hpr-v2:latest,ccall48/chirpstack-hpr-v2:${{ gitea.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           platforms: linux/amd64
           push: true
-          tags: |
-            ccall48/chirpstack-hpr-v2:latest
-            ccall48/chirpstack-hpr-v2:${{ gitea.sha }}
+          tags: ${{ steps.image_tags.outputs.tags }}
+
+      # publish a Gitea release for the pushed tag, using the run's built-in
+      # GITEA_TOKEN (auto-issued per job, no extra secret needed)
+      - name: Create Gitea release
+        if: startsWith(gitea.ref, 'refs/tags/')
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ secrets.GITEA_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\": \"${{ gitea.ref_name }}\", \"name\": \"${{ gitea.ref_name }}\", \"draft\": false, \"prerelease\": false}" \
+            "${{ gitea.server_url }}/api/v1/repos/${{ gitea.repository }}/releases"
