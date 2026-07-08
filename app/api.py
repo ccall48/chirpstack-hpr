@@ -19,7 +19,12 @@ AUTH_TOKEN = [('authorization', f'Bearer {CHIRPSTACK_APIKEY}')]
 # Single shared channel to ChirpStack - gRPC channels are meant to be
 # long-lived and multiplex many concurrent RPCs, so one channel for the
 # whole process is correct rather than opening/closing one per call.
-_channel = grpc.aio.insecure_channel(CHIRPSTACK_HOST)
+# Created lazily (not here at import time): grpc.aio.Channel binds to
+# whichever event loop is running when it's constructed, and this module
+# is imported before asyncio.run() starts the real loop - building it here
+# attaches it to the wrong loop and every RPC fails with
+# "attached to a different loop".
+_channel = None
 
 _redis = redis.Redis(
     host=os.getenv('REDIS_HOST'),
@@ -34,16 +39,24 @@ _redis = redis.Redis(
 DEVICE_DATA_CACHE_TTL = 30  # seconds
 
 
+async def _get_channel() -> grpc.aio.Channel:
+    global _channel
+    if _channel is None:
+        _channel = grpc.aio.insecure_channel(CHIRPSTACK_HOST)
+    return _channel
+
+
 async def close_channel():
     """Call this once when the script shuts down."""
-    await _channel.close()
+    if _channel is not None:
+        await _channel.close()
 
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 #  Get device EUI's
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_device_euis(dev_eui) -> int | int:
-    client = api.DeviceServiceStub(_channel)
+    client = api.DeviceServiceStub(await _get_channel())
     req = api.GetDeviceRequest()
     req.dev_eui = dev_eui
     resp = await client.Get(req, metadata=AUTH_TOKEN)
@@ -55,7 +68,7 @@ async def get_device_euis(dev_eui) -> int | int:
 #  Functions for database device sync
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_tenant_list() -> list[str]:
-    client = api.TenantServiceStub(_channel)
+    client = api.TenantServiceStub(await _get_channel())
     # # Define the API key meta-data.
     req = api.ListTenantsRequest()
     req.limit = 1000  # mandatory if you want details.
@@ -65,7 +78,7 @@ async def get_tenant_list() -> list[str]:
 
 
 async def get_tennant_apps(tenant_id: str) -> list[str]:
-    client = api.ApplicationServiceStub(_channel)
+    client = api.ApplicationServiceStub(await _get_channel())
     # # Define the API key meta-data.
     req = api.ListApplicationsRequest()
     req.limit = 1000  # mandatory if you want details.
@@ -78,7 +91,7 @@ async def get_tennant_apps(tenant_id: str) -> list[str]:
 
 
 async def get_application_devices(application_id: str) -> list[str]:
-    client = api.DeviceServiceStub(_channel)
+    client = api.DeviceServiceStub(await _get_channel())
     # # Construct request.
     req = api.ListDevicesRequest()
     req.limit = 1000  # mandatory if you want details.
@@ -132,7 +145,7 @@ async def get_device_data(dev_eui: str, use_cache: bool = True) -> dict:
         except redis.RedisError as e:
             print('[Redis Error: get_device_data read]', e)
 
-    client = api.DeviceServiceStub(_channel)
+    client = api.DeviceServiceStub(await _get_channel())
     req = api.GetDeviceRequest()
     req.dev_eui = dev_eui
     a = MessageToDict(await client.Get(req, metadata=AUTH_TOKEN), True)['device']
