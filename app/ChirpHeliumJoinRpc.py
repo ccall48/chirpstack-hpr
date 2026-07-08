@@ -30,10 +30,10 @@ class ChirpstackJoins:
         self.cs_grpc = chirpstack_host
         self.auth_token = [("authorization", f"Bearer {chirpstack_token}")]
 
-    async def db_transaction(self, query: str):
+    async def db_transaction(self, query: str, *params):
         async with self.pool.acquire() as con:
             async with con.transaction():
-                await con.execute(query)
+                await con.execute(query, *params)
 
     ###########################################################################
     # follow internal redis stream gRPC for actionable changes
@@ -122,7 +122,7 @@ class ChirpstackJoins:
         query = """
             INSERT INTO helium_devices
             (dev_eui, join_eui, dev_addr, max_copies, aps_key, nws_key, dev_name, fcnt_up, fcnt_down)
-            VALUES (%(dev_eui)s, %(join_eui)s, %(dev_addr)s, %(max_copies)s, %(aps_key)s, %(nws_key)s, %(dev_name)s, %(fcnt_up)s, %(fcnt_down)s)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (dev_eui) DO UPDATE
             SET join_eui = EXCLUDED.join_eui,
                 dev_addr = EXCLUDED.dev_addr,
@@ -133,15 +133,15 @@ class ChirpstackJoins:
                 fcnt_up = EXCLUDED.fcnt_up,
                 fcnt_down = EXCLUDED.fcnt_down;
         """
-        params = {
-            "dev_eui": devices["devEui"],
-            "join_eui": devices["joinEui"],
-            "dev_addr": devices["devAddr"],
-            "max_copies": max_copies,
-            "aps_key": devices["appSKey"],
-            "nws_key": devices["nwkSEncKey"],
-            "dev_name": devices["name"],
-            "fcnt_up": devices["fCntUp"],
-            "fcnt_down": devices["nFCntDown"],
-        }
-        self.db_transaction(query, params)
+        await self.db_transaction(
+            query,
+            devices["devEui"],
+            devices["joinEui"],
+            devices["devAddr"],
+            max_copies,
+            devices["appSKey"],
+            devices["nwkSEncKey"],
+            devices["name"],
+            devices["fCntUp"],
+            devices["nFCntDown"],
+        )

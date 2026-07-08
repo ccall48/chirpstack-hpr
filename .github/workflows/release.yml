@@ -1,0 +1,54 @@
+name: Tag and Release
+
+# On every push to master, auto-bump the patch version (vX.Y.Z -> vX.Y.Z+1,
+# starting at v0.1.0 if no tags exist yet), tag it, and publish a GitHub
+# Release. Publishing the release triggers build-container-image.yml, which
+# builds and pushes the versioned container image to ghcr.io.
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag_and_release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          latest_tag=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "$latest_tag" ]; then
+            next_tag="v0.1.0"
+          else
+            IFS='.' read -r major minor patch <<< "${latest_tag#v}"
+            next_tag="v${major}.${minor}.$((patch + 1))"
+          fi
+          echo "Latest tag: ${latest_tag:-<none>}, next tag: ${next_tag}"
+          echo "tag=${next_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes
