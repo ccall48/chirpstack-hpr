@@ -16,6 +16,11 @@ CHIRPSTACK_HOST = os.getenv('CHIRPSTACK_SERVER')
 CHIRPSTACK_APIKEY = os.getenv('CHIRPSTACK_APIKEY')
 AUTH_TOKEN = [('authorization', f'Bearer {CHIRPSTACK_APIKEY}')]
 
+# Single shared channel to ChirpStack - gRPC channels are meant to be
+# long-lived and multiplex many concurrent RPCs, so one channel for the
+# whole process is correct rather than opening/closing one per call.
+_channel = grpc.aio.insecure_channel(CHIRPSTACK_HOST)
+
 _redis = redis.Redis(
     host=os.getenv('REDIS_HOST'),
     port=6379,
@@ -29,16 +34,20 @@ _redis = redis.Redis(
 DEVICE_DATA_CACHE_TTL = 30  # seconds
 
 
+async def close_channel():
+    """Call this once when the script shuts down."""
+    await _channel.close()
+
+
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 #  Get device EUI's
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_device_euis(dev_eui) -> int | int:
-    async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
-        client = api.DeviceServiceStub(channel)
-        req = api.GetDeviceRequest()
-        req.dev_eui = dev_eui
-        resp = await client.Get(req, metadata=AUTH_TOKEN)
-        data = MessageToDict(resp)['device']
+    client = api.DeviceServiceStub(_channel)
+    req = api.GetDeviceRequest()
+    req.dev_eui = dev_eui
+    resp = await client.Get(req, metadata=AUTH_TOKEN)
+    data = MessageToDict(resp)['device']
     return data['devEui'], data['joinEui']
 
 
@@ -46,41 +55,38 @@ async def get_device_euis(dev_eui) -> int | int:
 #  Functions for database device sync
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_tenant_list() -> list[str]:
-    async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
-        client = api.TenantServiceStub(channel)
-        # # Define the API key meta-data.
-        req = api.ListTenantsRequest()
-        req.limit = 1000  # mandatory if you want details.
-        resp = await client.List(req, metadata=AUTH_TOKEN)
-        tenants = [x['id'] for x in MessageToDict(resp)['result']]
+    client = api.TenantServiceStub(_channel)
+    # # Define the API key meta-data.
+    req = api.ListTenantsRequest()
+    req.limit = 1000  # mandatory if you want details.
+    resp = await client.List(req, metadata=AUTH_TOKEN)
+    tenants = [x['id'] for x in MessageToDict(resp)['result']]
     return tenants
 
 
 async def get_tennant_apps(tenant_id: str) -> list[str]:
-    async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
-        client = api.ApplicationServiceStub(channel)
-        # # Define the API key meta-data.
-        req = api.ListApplicationsRequest()
-        req.limit = 1000  # mandatory if you want details.
-        req.tenant_id = tenant_id
-        resp = await client.List(req, metadata=AUTH_TOKEN)
-        data = MessageToDict(resp)
-        if data.get('result'):
-            return [x['id'] for x in data['result']]
+    client = api.ApplicationServiceStub(_channel)
+    # # Define the API key meta-data.
+    req = api.ListApplicationsRequest()
+    req.limit = 1000  # mandatory if you want details.
+    req.tenant_id = tenant_id
+    resp = await client.List(req, metadata=AUTH_TOKEN)
+    data = MessageToDict(resp)
+    if data.get('result'):
+        return [x['id'] for x in data['result']]
     return
 
 
 async def get_application_devices(application_id: str) -> list[str]:
-    async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
-        client = api.DeviceServiceStub(channel)
-        # # Construct request.
-        req = api.ListDevicesRequest()
-        req.limit = 1000  # mandatory if you want details.
-        req.application_id = application_id
-        resp = await client.List(req, metadata=AUTH_TOKEN)
-        devices = MessageToDict(resp)
-        if devices.get('result'):
-            return [x['devEui'] for x in devices['result']]
+    client = api.DeviceServiceStub(_channel)
+    # # Construct request.
+    req = api.ListDevicesRequest()
+    req.limit = 1000  # mandatory if you want details.
+    req.application_id = application_id
+    resp = await client.List(req, metadata=AUTH_TOKEN)
+    devices = MessageToDict(resp)
+    if devices.get('result'):
+        return [x['devEui'] for x in devices['result']]
     return
 
 
@@ -126,18 +132,17 @@ async def get_device_data(dev_eui: str, use_cache: bool = True) -> dict:
         except redis.RedisError as e:
             print('[Redis Error: get_device_data read]', e)
 
-    async with grpc.aio.insecure_channel(CHIRPSTACK_HOST) as channel:
-        client = api.DeviceServiceStub(channel)
-        req = api.GetDeviceRequest()
-        req.dev_eui = dev_eui
-        a = MessageToDict(await client.Get(req, metadata=AUTH_TOKEN), True)['device']
-        b = MessageToDict(await client.GetActivation(req, metadata=AUTH_TOKEN), True)
-        if b.get('deviceActivation'):
-            b = b['deviceActivation']
-            c = MessageToDict(await client.GetKeys(req, metadata=AUTH_TOKEN), True)['deviceKeys']
-            data = a | b | c
-        else:
-            data = a | b
+    client = api.DeviceServiceStub(_channel)
+    req = api.GetDeviceRequest()
+    req.dev_eui = dev_eui
+    a = MessageToDict(await client.Get(req, metadata=AUTH_TOKEN), True)['device']
+    b = MessageToDict(await client.GetActivation(req, metadata=AUTH_TOKEN), True)
+    if b.get('deviceActivation'):
+        b = b['deviceActivation']
+        c = MessageToDict(await client.GetKeys(req, metadata=AUTH_TOKEN), True)['deviceKeys']
+        data = a | b | c
+    else:
+        data = a | b
 
     try:
         await _redis.set(cache_key, json.dumps(data), ex=DEVICE_DATA_CACHE_TTL)
