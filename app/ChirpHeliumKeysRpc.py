@@ -77,7 +77,7 @@ class ChirpDeviceKeys:
 
         max_copies = 0
         if devices.get("variables") and "max_copies" in devices.get("variables"):
-            max_copies = devices["variables"]["max_copies"]
+            max_copies = int(devices["variables"]["max_copies"])
         if "fCntUp" not in devices.keys():
             devices["fCntUp"] = 0
         if "nFCntDown" not in devices.keys():
