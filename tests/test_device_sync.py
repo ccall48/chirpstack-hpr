@@ -58,7 +58,7 @@ class DeviceSyncTests(DatabaseTestCase):
         await self.seed_skfs([leftover['nwkSEncKey']])
         return {data['devEui']: data for data in active}, leftover
 
-    async def test_complete_pass_removes_leftover_device_at_ten_percent(self):
+    async def test_complete_pass_removes_leftover_device(self):
         active, leftover = await self.seed_cleanup_inventory()
         error = grpc.aio.AioRpcError(grpc.StatusCode.NOT_FOUND, (), (), details='deleted')
         with patch.object(HeliumProtos, 'get_device_data', AsyncMock(side_effect=error)) as fetch:
@@ -83,18 +83,29 @@ class DeviceSyncTests(DatabaseTestCase):
         self.assertIsNotNone(await self.db.get_device(leftover['devEui']))
         self.assertEqual(await self.stored_skfs(), {leftover['nwkSEncKey']})
 
-    async def test_cleanup_over_ten_percent_is_skipped_and_logged(self):
-        active, leftover = await self.seed_cleanup_inventory(active_count=8)
-        with patch.object(app, 'print', create=True) as output:
+    async def test_cleanup_removes_every_missing_device_without_size_limit(self):
+        # An application or tenant delete removes many devices at once without Delete events.
+        active, _ = await self.seed_cleanup_inventory(active_count=1)
+        error = grpc.aio.AioRpcError(grpc.StatusCode.NOT_FOUND, (), (), details='deleted')
+        await self.db.upsert_device([
+            device_row(GetDeviceSyncRequest(**device(dev_eui=f'{index:016x}', key=f'{index:032x}')),
+                       1.0, self.hpr.route_id)
+            for index in range(100, 108)
+        ])
+        with patch.object(HeliumProtos, 'get_device_data', AsyncMock(side_effect=error)):
             state = await self.run_passes(active)
         self.assertTrue(state.complete)
-        self.assertTrue(any('exceeds 10%' in call.args[0] for call in output.call_args_list))
-        self.hpr.route_euis.assert_not_awaited()
-        self.assertIsNotNone(await self.db.get_device(leftover['devEui']))
+        self.assertEqual(self.hpr.route_euis.await_count, 9)
+        self.assertEqual(await self.db.get_device_euis(), {str(int(eui, 16)) for eui in active})
 
-    async def test_empty_listing_does_not_delete_inventory(self):
+    async def test_empty_listing_does_not_delete_existing_devices(self):
         await self.seed_cleanup_inventory()
-        await self.run_passes({})
+
+        async def get(dev_eui, use_cache):
+            return device(dev_eui=dev_eui), 2.0
+
+        with patch.object(HeliumProtos, 'get_device_data', get):
+            await self.run_passes({})
         self.hpr.route_euis.assert_not_awaited()
         self.assertEqual(len(await self.db.get_device_euis()), 10)
 

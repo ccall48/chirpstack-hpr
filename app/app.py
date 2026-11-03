@@ -121,13 +121,10 @@ async def devices_sync_upsert(hpr, sync_state):
             if sync_state.complete:
                 stored_euis = await hpr.database.get_device_euis()
                 discovered_euis = {str(int(eui, 16)) for eui in device_euis}
-                missing_euis = stored_euis - discovered_euis
-                if len(missing_euis) * 10 > len(stored_euis):
-                    print(f'[Skipping deleted-device cleanup]: {len(missing_euis)}/{len(stored_euis)} '
-                          'rows missing from discovery exceeds 10%')
-                else:
-                    for dev_eui in sorted(missing_euis):
-                        await hpr.remove_device_euis({'dev_eui': f'{int(dev_eui):016x}'}, require_missing=True)
+                # No size guard: deleting an application or tenant emits no per-device Delete events.
+                # require_missing rechecks each device, so an incomplete listing never removes an existing one.
+                for dev_eui in sorted(stored_euis - discovered_euis):
+                    await hpr.remove_device_euis({'dev_eui': f'{int(dev_eui):016x}'}, require_missing=True)
             print(f'{time.ctime()} DEVICE/SKF SYNC: {synced}/{len(device_euis)} devices')
         except Exception as err:
             sync_state.complete = False
