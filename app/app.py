@@ -118,8 +118,19 @@ async def devices_sync_upsert(hpr, sync_state):
                     synced += len(devices)
             # Only a fully discovered, committed and reconciled pass permits purge.
             sync_state.complete = complete
+            if sync_state.complete:
+                stored_euis = await hpr.database.get_device_euis()
+                discovered_euis = {str(int(eui, 16)) for eui in device_euis}
+                missing_euis = stored_euis - discovered_euis
+                if len(missing_euis) * 10 > len(stored_euis):
+                    print(f'[Skipping deleted-device cleanup]: {len(missing_euis)}/{len(stored_euis)} '
+                          'rows missing from discovery exceeds 10%')
+                else:
+                    for dev_eui in sorted(missing_euis):
+                        await hpr.remove_device_euis({'dev_eui': f'{int(dev_eui):016x}'}, require_missing=True)
             print(f'{time.ctime()} DEVICE/SKF SYNC: {synced}/{len(device_euis)} devices')
         except Exception as err:
+            sync_state.complete = False
             print(f'[device/SKF sync error]: {err}')
         # Retry failed registrations indefinitely, including failures after startup.
         delay = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5) if sync_state.complete else 5

@@ -186,6 +186,14 @@ class DeviceDatabase:
             await db.rollback()
 
 
+    async def get_device_euis(self):
+        if not self.pool:
+            await self.init_pool()
+        async with self.pool.connection() as db:
+            async with db.execute("SELECT devEui FROM devices") as cursor:
+                return {row[0] for row in await cursor.fetchall()}
+
+
     async def get_device(self, dev_eui):
         if not self.pool:
             await self.init_pool()

@@ -208,12 +208,22 @@ class HeliumConfigCli:
     async def add_device_euis(self, meta):
         await self.sync_device(meta['dev_eui'], update_euis=True)
 
-    async def remove_device_euis(self, meta):
+    async def remove_device_euis(self, meta, require_missing=False):
         dev_eui = (meta or {}).get('dev_eui')
         if not dev_eui:
             print('Skipping delete without dev_eui')
             return
         async with self.sync_lock:
+            if require_missing:
+                # Discovery may predate a create/recreate event. Recheck under the write lock.
+                try:
+                    await get_device_data(dev_eui, use_cache=False)
+                except grpc.aio.AioRpcError as err:
+                    if err.code() != grpc.StatusCode.NOT_FOUND:
+                        raise
+                else:
+                    print(f'Skipping cleanup for existing device {dev_eui}')
+                    return
             row = await self.database.get_device(dev_eui)
             if row is None:
                 print(f'Skipping delete for unknown device {dev_eui}')
