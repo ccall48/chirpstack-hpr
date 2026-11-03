@@ -53,6 +53,24 @@ class UplinkDeliveryTests(unittest.IsolatedAsyncioTestCase):
             )
             publisher._client.send_message.assert_called_once()
 
+    async def test_sqlite_redis_and_sqs_bill_the_same_dc(self):
+        # 12 payload bytes -> 25 byte frame -> 2 DC per copy, 2 helium copies
+        payload = ParseDict(uplink(12), integration.UplinkEvent()).SerializeToString()
+        reader = AsyncMock()
+        reader.read.side_effect = [
+            [("device", (b"1000-0", {b"up": payload}))],
+            asyncio.CancelledError(),
+        ]
+        publisher = AsyncMock()
+        with patch.object(app, "database", AsyncMock()) as database, patch.object(
+            app, "deviceredis", AsyncMock()
+        ) as device_redis, patch("builtins.print"):
+            with self.assertRaises(asyncio.CancelledError):
+                await app.redis_events_streams(reader, Mock(), publisher)
+        self.assertEqual(database.upsert_data_credits.await_args.args[2], 4)
+        self.assertEqual(device_redis.tenant_dc_stream.await_args.args[0]["dc_used"], 4)
+        self.assertEqual(publisher.publish.await_args.args[0]["dc_used"], 4)
+
     async def test_disabled_publishing_keeps_existing_accounting(self):
         payload = ParseDict(uplink(0), integration.UplinkEvent()).SerializeToString()
         reader = AsyncMock()

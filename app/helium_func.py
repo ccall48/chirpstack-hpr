@@ -1,20 +1,26 @@
 import asyncio
+import base64
 import time
 from math import ceil
 
 
 def data_bytes_size(b64string: str) -> int:
     """
-    get byte count from a given base64 string from its length if 0 return 1.
-    inital example: https://stackoverflow.com/a/6793638
+    DC per copy: Helium bills ceil(max(frame_bytes, 24) / 24) on the full LoRaWAN frame.
+    frame = MHDR(1) + DevAddr(4) + FCtrl(1) + FCnt(2) + MIC(4) = 12, + FPort(1) + payload when there is data.
+    FOpts isn't in the uplink event, so this is a lower bound.
     """
-    helium_bytes_per_dc = 24
-    # dc = ceil(((len(b64string)*3)/4)/24)
-    dc_used = ceil(((len(b64string) - b64string.count('='))*3//4)/helium_bytes_per_dc)
-    if dc_used == 0:
-        # we still get chatged per uplink if msg <= 0 bytes
-        return 1
-    return dc_used
+    payload_bytes = len(base64.b64decode(b64string or ''))
+    frame_bytes = payload_bytes + 13 if payload_bytes else 12
+    return ceil(max(frame_bytes, 24) / 24)
+
+
+def uplink_dc_used(uplink):
+    hotspots = sum(
+        gw.get('metadata', {}).get('network') == 'helium_iot'
+        for gw in uplink.get('rxInfo', [])
+    )
+    return data_bytes_size(uplink.get('data', '')) * hotspots
 
 
 def get_time():
