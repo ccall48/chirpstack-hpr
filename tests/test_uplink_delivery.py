@@ -111,6 +111,49 @@ class UplinkDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 getattr(hpr, handler).assert_awaited_once_with(metadata)
                 reader.acknowledge.assert_awaited_once_with("api", b"1000-0")
 
+    def _api_request(self, method, **fields):
+        return ParseDict({
+            "service": "api.DeviceService", "method": method, **fields,
+        }, stream.ApiRequestLog()).SerializeToString()
+
+    async def test_poison_message_is_skipped_after_retries_and_next_is_processed(self):
+        poison = ("api", (b"1000-0", {b"request": self._api_request(
+            "Create", metadata={"dev_eui": "0102030405060708"})}))
+        reader = AsyncMock()
+        reader.read.side_effect = [[poison]] * app.MAX_MESSAGE_ATTEMPTS + [
+            [("api", (b"1001-0", {b"request": self._api_request(
+                "Update", metadata={"dev_eui": "0102030405060708"})}))],
+            asyncio.CancelledError(),
+        ]
+        hpr = AsyncMock()
+        hpr.add_device_euis.side_effect = KeyError("dev_eui")
+        with patch("app.asyncio.sleep", new_callable=AsyncMock), patch("builtins.print"):
+            with self.assertRaises(asyncio.CancelledError):
+                await app.redis_events_streams(reader, hpr)
+        self.assertEqual(hpr.add_device_euis.await_count, app.MAX_MESSAGE_ATTEMPTS)
+        hpr.update_device.assert_awaited_once()
+        self.assertEqual(reader.acknowledge.await_args_list, [
+            (("api", b"1000-0"),), (("api", b"1001-0"),),
+        ])
+
+    async def test_device_request_without_metadata_is_acknowledged(self):
+        for method in ("Create", "Delete", "Update"):
+            with self.subTest(method=method):
+                reader = AsyncMock()
+                reader.read.side_effect = [
+                    [("api", (b"1000-0", {b"request": self._api_request(method)}))],
+                    asyncio.CancelledError(),
+                ]
+                hpr = AsyncMock()
+                with patch("builtins.print") as output:
+                    with self.assertRaises(asyncio.CancelledError):
+                        await app.redis_events_streams(reader, hpr)
+                    self.assert_no_handler_errors(output)
+                hpr.add_device_euis.assert_not_awaited()
+                hpr.remove_device_euis.assert_not_awaited()
+                hpr.update_device.assert_not_awaited()
+                reader.acknowledge.assert_awaited_once_with("api", b"1000-0")
+
     async def test_ignored_requests_are_acknowledged(self):
         reader = AsyncMock()
         reader.read.side_effect = [

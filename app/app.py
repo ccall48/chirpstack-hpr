@@ -38,6 +38,7 @@ deviceredis = DeviceRedis()
 SYNC_INTERVAL_MIN = int(os.getenv('SYNC_INTERVAL_MIN_SECONDS', 300))
 SYNC_INTERVAL_MAX = int(os.getenv('SYNC_INTERVAL_MAX_SECONDS', 600))
 DEVICE_FETCH_CONCURRENCY = 50
+MAX_MESSAGE_ATTEMPTS = 3
 
 
 class SyncState:
@@ -135,109 +136,127 @@ async def sync_session_keys(hpr, sync_state):
         await asyncio.sleep(sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5))
 
 
+async def handle_message(message, hpr, publisher=None):
+    if b'request' in message[1]:
+        msg = message[1][b'request']
+        if b'inform' in msg:
+            # ignore {"service": "inform"}
+            return
+
+        pl = stream.ApiRequestLog()
+        pl.ParseFromString(msg)
+        req = MessageToDict(pl)
+
+        if 'method' not in req:
+            return
+
+        match req['service']:
+            case 'api.DeviceService':
+                # Protobuf JSON omits an empty metadata map.
+                if req['method'] in ('Create', 'Delete', 'Update') and not req.get('metadata', {}).get('dev_eui'):
+                    print(f'[Skipping {req["method"]} without dev_eui]: {MessageToJson(pl)}')
+                    return
+
+                if req['method'] == 'Create':
+                    print('========== API Create Euis ==========')
+                    print(MessageToJson(pl))
+                    await hpr.add_device_euis(req['metadata'])
+
+                if req['method'] == 'Delete':
+                    print('========== API Delete Euis ==========')
+                    print(MessageToJson(pl))
+                    await hpr.remove_device_euis(req['metadata'])
+
+                if req['method'] == 'Update':
+                    print('========== API Update Euis ==========')
+                    print(MessageToJson(pl))
+                    await hpr.update_device(req['metadata'])
+
+    if b'join' in message[1]:
+        msg = message[1][b'join']
+        pl = integration.JoinEvent()
+        pl.ParseFromString(msg)
+        dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
+        await hpr.sync_device(dev_eui)
+
+    if b'up' in message[1]:
+        msg = message[1][b'up']
+        pl = integration.UplinkEvent()
+        pl.ParseFromString(msg)
+        req = MessageToDict(pl)
+
+        if publisher is not None:
+            try:
+                await publish_usage_event(publisher, req, message[0], route_id)
+            except Exception as exc:
+                # best-effort: don't stall device/join sync behind a billing outage
+                print(f'[Usage publish failed, dropping event]: {exc}')
+
+        tenant_id = req['deviceInfo']['tenantId']
+        # Protobuf JSON omits empty optional fields.
+        tenant_name = req['deviceInfo'].get('tenantName', '')
+        device_name = req['deviceInfo'].get('deviceName', '')
+        device_eui = req['deviceInfo']['devEui']
+
+        # avoid creating a list, only iterate over data once
+        hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
+
+        if req.get('data'):
+            print('Data:', req['data'])
+
+            dc = data_bytes_size(req['data'])
+            total_dc = dc * hotspots
+
+            print('Tenant:', tenant_name, 'Device:', device_name)
+            print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
+            # decouple sqlite tenant dc count to redis stream?
+            await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
+            #
+            await deviceredis.tenant_dc_stream({
+                'tenant_id': tenant_id,
+                'tenant_name': tenant_name,
+                'device_name': device_name,
+                'device_eui': device_eui,
+                'dc_used': total_dc,
+            })
+        else:
+            # blank uplink data cost 1 DC * hotspots seen
+            print('Tenant:', tenant_name, 'Device:', device_name)
+            print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
+            # decouple sqlite tenant dc count to redis stream?
+            await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
+            #
+            await deviceredis.tenant_dc_stream({
+                'tenant_id': tenant_id,
+                'tenant_name': tenant_name,
+                'device_name': device_name,
+                'device_eui': device_eui,
+                'dc_used': hotspots,
+            })
+
+        print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
+
+
 async def redis_events_streams(reader, hpr, publisher=None):
+    failures = {}
     while True:
         try:
             resp = await reader.read()
 
             for stream_name, message in resp:
-
-                if b'request' in message[1]:
-                    msg = message[1][b'request']
-                    if b'inform' in msg:
-                        # ignore {"service": "inform"}
-                        await reader.acknowledge(stream_name, message[0])
+                key = (stream_name, message[0])
+                try:
+                    await handle_message(message, hpr, publisher)
+                except Exception as exc:
+                    # The offset stays put, so the next read retries this message.
+                    failures[key] = failures.get(key, 0) + 1
+                    print(f'[Error]: {stream_name} {message[0]} attempt {failures[key]}:\n {exc}')
+                    print('^ * * * * * * * * * * ^ ERROR ^ * * * * * * * * * * ^')
+                    if failures[key] < MAX_MESSAGE_ATTEMPTS:
+                        await asyncio.sleep(5)
                         continue
-
-                    pl = stream.ApiRequestLog()
-                    pl.ParseFromString(msg)
-                    req = MessageToDict(pl)
-
-                    if 'method' not in req:
-                        await reader.acknowledge(stream_name, message[0])
-                        continue
-
-                    match req['service']:
-                        case 'api.DeviceService':
-                            if req['method'] == 'Create':
-                                print('========== API Create Euis ==========')
-                                print(MessageToJson(pl))
-                                await hpr.add_device_euis(req['metadata'])
-
-                            if req['method'] == 'Delete':
-                                print('========== API Delete Euis ==========')
-                                print(MessageToJson(pl))
-                                await hpr.remove_device_euis(req['metadata'])
-
-                            if req['method'] == 'Update':
-                                print('========== API Update Euis ==========')
-                                print(MessageToJson(pl))
-                                await hpr.update_device(req['metadata'])
-
-                if b'join' in message[1]:
-                    msg = message[1][b'join']
-                    pl = integration.JoinEvent()
-                    pl.ParseFromString(msg)
-                    dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
-                    await hpr.sync_device(dev_eui)
-
-                if b'up' in message[1]:
-                    msg = message[1][b'up']
-                    pl = integration.UplinkEvent()
-                    pl.ParseFromString(msg)
-                    req = MessageToDict(pl)
-
-                    if publisher is not None:
-                        try:
-                            await publish_usage_event(publisher, req, message[0], route_id)
-                        except Exception as exc:
-                            # best-effort: don't stall device/join sync behind a billing outage
-                            print(f'[Usage publish failed, dropping event]: {exc}')
-
-                    tenant_id = req['deviceInfo']['tenantId']
-                    # Protobuf JSON omits empty optional fields.
-                    tenant_name = req['deviceInfo'].get('tenantName', '')
-                    device_name = req['deviceInfo'].get('deviceName', '')
-                    device_eui = req['deviceInfo']['devEui']
-
-                    # avoid creating a list, only iterate over data once
-                    hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
-
-                    if req.get('data'):
-                        print('Data:', req['data'])
-
-                        dc = data_bytes_size(req['data'])
-                        total_dc = dc * hotspots
-
-                        print('Tenant:', tenant_name, 'Device:', device_name)
-                        print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
-                        # decouple sqlite tenant dc count to redis stream?
-                        await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
-                        #
-                        await deviceredis.tenant_dc_stream({
-                            'tenant_id': tenant_id,
-                            'tenant_name': tenant_name,
-                            'device_name': device_name,
-                            'device_eui': device_eui,
-                            'dc_used': total_dc,
-                        })
-                    else:
-                        # blank uplink data cost 1 DC * hotspots seen
-                        print('Tenant:', tenant_name, 'Device:', device_name)
-                        print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
-                        # decouple sqlite tenant dc count to redis stream?
-                        await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
-                        #
-                        await deviceredis.tenant_dc_stream({
-                            'tenant_id': tenant_id,
-                            'tenant_name': tenant_name,
-                            'device_name': device_name,
-                            'device_eui': device_eui,
-                            'dc_used': hotspots,
-                        })
-
-                    print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
-
+                    print(f'[Skipping poison message]: {stream_name} {message[0]}')
+                failures.pop(key, None)
                 await reader.acknowledge(stream_name, message[0])
 
             await asyncio.sleep(0)
