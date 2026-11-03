@@ -186,6 +186,41 @@ class DeviceSyncTests(DatabaseTestCase):
                 self.assertFalse(self.hpr.sync_lock.locked())
 
 
+class DeleteDeviceTests(DatabaseTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.data = device()
+        await self.db.upsert_device([device_row(GetDeviceSyncRequest(**self.data), 1.0, self.hpr.route_id)])
+        await self.seed_skfs([self.data["nwkSEncKey"], "other"])
+
+    async def test_delete_removes_euis_skf_and_device_row(self):
+        await self.hpr.remove_device_euis({"dev_eui": self.data["devEui"]})
+        self.hpr.route_euis.assert_awaited_once_with(
+            int(self.data["devEui"], 16), int(self.data["joinEui"], 16), 1
+        )
+        update = self.hpr.route_skfs.await_args.args[0][0]
+        self.assertEqual((update.session_key, update.devaddr, update.action),
+                         (self.data["nwkSEncKey"], int(self.data["devAddr"], 16), 1))
+        self.assertIsNone(await self.db.get_device(self.data["devEui"]))
+        self.assertEqual(await self.stored_skfs(), {"other"})
+        self.assertFalse(self.hpr.sync_lock.locked())
+
+    async def test_failed_skf_removal_keeps_device_row_for_retry(self):
+        self.hpr.route_skfs.side_effect = RuntimeError("timeout")
+        with self.assertRaisesRegex(RuntimeError, "timeout"):
+            await self.hpr.remove_device_euis({"dev_eui": self.data["devEui"]})
+        self.assertEqual(await self.stored_key(), self.data["nwkSEncKey"])
+        self.assertFalse(self.hpr.sync_lock.locked())
+
+    async def test_delete_without_metadata_or_unknown_device_is_skipped(self):
+        for meta in (None, {}, {"dev_eui": ""}, {"dev_eui": "ffffffffffffffff"}):
+            with self.subTest(meta=meta), patch("builtins.print"):
+                await self.hpr.remove_device_euis(meta)
+        self.hpr.route_euis.assert_not_awaited()
+        self.hpr.route_skfs.assert_not_awaited()
+        self.assertEqual(await self.stored_key(), self.data["nwkSEncKey"])
+
+
 class StaleSkfTests(DatabaseTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()

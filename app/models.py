@@ -186,24 +186,27 @@ class DeviceDatabase:
             await db.rollback()
 
 
-    async def get_device_euis(self, dev_eui):
+    async def get_device(self, dev_eui):
         if not self.pool:
             await self.init_pool()
 
-        sql = f"""
-            SELECT devEui, joinEui
-            FROM devices
-            WHERE devEui = '{int(dev_eui, 16)}';
-        """
-        try:
-            async with self.pool.connection() as db:
-                db.row_factory = aiosqlite.Row
-                async with db.execute(sql) as cursor:
-                    row = await cursor.fetchone()
-                return int(row['devEui']), int(row['joinEui'])
-        except aiosqlite.Error as e:
-            print('[SQL Error get_device_euis]\n', e)
-            await db.rollback()
+        sql = "SELECT devEui, joinEui, devAddr, nwkSEncKey FROM devices WHERE devEui = ?"
+        async with self.pool.connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, (str(int(dev_eui, 16)),)) as cursor:
+                return await cursor.fetchone()
+
+
+    async def delete_device(self, dev_eui):
+        if not self.pool:
+            await self.init_pool()
+        async with self.pool.connection() as db:
+            try:
+                await db.execute("DELETE FROM devices WHERE devEui = ?", (str(int(dev_eui, 16)),))
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
 
 
     # # # # # # # # # #
