@@ -4,17 +4,12 @@ from math import ceil
 
 
 def data_bytes_size(b64string: str) -> int:
-    """
-    get byte count from a given base64 string from its length if 0 return 1.
-    inital example: https://stackoverflow.com/a/6793638
-    """
-    helium_bytes_per_dc = 24
-    # dc = ceil(((len(b64string)*3)/4)/24)
-    dc_used = ceil(((len(b64string) - b64string.count('='))*3//4)/helium_bytes_per_dc)
-    if dc_used == 0:
-        # we still get chatged per uplink if msg <= 0 bytes
-        return 1
-    return dc_used
+    """DC for one uplink copy, estimated from the app payload (base64)."""
+    bytes_per_dc = 24
+    uplink_overhead = 13  # MHDR 1 + DevAddr 4 + FCtrl 1 + FCnt 2 + FPort 1 + MIC 4
+    payload_len = (len(b64string) - b64string.count('=')) * 3 // 4
+    frame_len = uplink_overhead + payload_len
+    return max(ceil(frame_len / bytes_per_dc), 1)
 
 
 def get_time():
