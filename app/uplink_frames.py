@@ -1,10 +1,12 @@
-"""Match integration events to ChirpStack's retained per-device frame logs."""
-
+import asyncio
 import re
 
 from chirpstack_api import stream
 from google.protobuf.message import DecodeError
 from redis.exceptions import RedisError
+
+
+FRAME_LOOKUP_TIMEOUT = 2
 
 
 async def get_uplink_frame_size(redis, uplink, message_id):
@@ -30,11 +32,14 @@ async def get_uplink_frame_size(redis, uplink, message_id):
     # Redis sequence numbers are independent between streams; include all entries
     # in the same millisecond as the integration event.
     try:
-        frames = await redis.xrevrange(
-            f'device:{{{dev_eui}}}:stream:frame',
-            max=f'{event_ms}-18446744073709551615', count=100,
+        frames = await asyncio.wait_for(
+            redis.xrevrange(
+                f'device:{{{dev_eui}}}:stream:frame',
+                max=f'{event_ms}-18446744073709551615', count=100,
+            ),
+            timeout=FRAME_LOOKUP_TIMEOUT,
         )
-    except RedisError as exc:
+    except (RedisError, TimeoutError) as exc:
         print(f'[Frame lookup failed]: {dev_eui}: {exc}')
         return None
 

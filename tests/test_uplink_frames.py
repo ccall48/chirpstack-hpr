@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -106,6 +107,25 @@ class UplinkFrameTests(unittest.IsolatedAsyncioTestCase):
         self.redis.xrevrange.side_effect = ConnectionError('unavailable')
         with patch('builtins.print'):
             self.assertIsNone(await get_uplink_frame_size(self.redis, self.event, '1000-0'))
+
+    async def test_stalled_lookup_is_cancelled_and_falls_back(self):
+        cancelled = asyncio.Event()
+
+        async def stalled(*args, **kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        self.redis.xrevrange.side_effect = stalled
+        with patch('uplink_frames.FRAME_LOOKUP_TIMEOUT', 0.01), patch('builtins.print'):
+            self.assertIsNone(await get_uplink_frame_size(self.redis, self.event, '1000-0'))
+        self.assertTrue(cancelled.is_set())
+
+    async def test_shutdown_cancellation_is_not_swallowed(self):
+        self.redis.xrevrange.side_effect = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await get_uplink_frame_size(self.redis, self.event, '1000-0')
 
     def test_invalid_measured_size_is_not_silently_billed(self):
         for value in [0, 11, -1, True, '25', 25.5]:

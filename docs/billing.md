@@ -18,7 +18,8 @@ Redis timestamp later than the integration event. Frame logs are written before
 the integration event by ChirpStack.
 
 If a matching frame is unavailable, including when logging is disabled, history
-has expired, reception IDs are missing or Redis is unavailable, accounting falls
+has expired, reception IDs are missing or the Redis lookup fails or exceeds its
+two-second deadline, accounting falls
 back to the application payload plus 13 bytes (12 for an empty payload). Each
 fallback emits `[DC frame size unavailable, using estimate]`. This estimate
 can miss FOpts and MAC-only payload bytes; it is not an exact frame measurement.
