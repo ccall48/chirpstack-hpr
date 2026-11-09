@@ -12,6 +12,7 @@ from redis_models import DeviceRedis
 from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
 from helium_func import uplink_dc_used
+from uplink_frames import get_uplink_frame_size
 from usage_publisher import create_usage_publisher, publish_usage_event
 from event_reader import EventReader
 from api import all_tenant_deveui, get_device_data
@@ -193,6 +194,15 @@ async def handle_message(message, hpr, publisher=None):
         pl.ParseFromString(msg)
         req = MessageToDict(pl)
 
+        hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
+        if hotspots:
+            frame_bytes = await get_uplink_frame_size(rdb, req, message[0])
+            if frame_bytes is None:
+                print(f'[DC frame size unavailable, using estimate]: {message[0]}')
+            else:
+                # Enrich the normalized event once so SQLite, Redis and SQS agree.
+                req['phyPayloadByteCount'] = frame_bytes
+
         if publisher is not None:
             try:
                 await publish_usage_event(publisher, req, message[0], route_id)
@@ -205,9 +215,6 @@ async def handle_message(message, hpr, publisher=None):
         tenant_name = req['deviceInfo'].get('tenantName', '')
         device_name = req['deviceInfo'].get('deviceName', '')
         device_eui = req['deviceInfo']['devEui']
-
-        # avoid creating a list, only iterate over data once
-        hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
 
         total_dc = uplink_dc_used(req)
 

@@ -97,6 +97,38 @@ class UplinkDeliveryTests(unittest.IsolatedAsyncioTestCase):
             reader.acknowledge.assert_awaited_once_with("device", b"1000-0")
             client.assert_not_called()
 
+    async def test_measured_frame_size_is_shared_by_all_billing_outputs(self):
+        for payload_size, frame_size in [(11, 25), (0, 28)]:
+            with self.subTest(payload_size=payload_size):
+                payload = ParseDict(uplink(payload_size), integration.UplinkEvent()).SerializeToString()
+                publisher = AsyncMock()
+                with patch.object(app, 'get_uplink_frame_size', AsyncMock(return_value=frame_size)), \
+                     patch.object(app, 'database', AsyncMock()) as database, \
+                     patch.object(app, 'deviceredis', AsyncMock()) as device_redis, patch('builtins.print'):
+                    await app.handle_message((b'1000-0', {b'up': payload}), Mock(), publisher)
+                self.assertEqual(database.upsert_data_credits.await_args.args[2], 4)
+                self.assertEqual(device_redis.tenant_dc_stream.await_args.args[0]['dc_used'], 4)
+                self.assertEqual(publisher.publish.await_args.args[0]['dc_used'], 4)
+
+    async def test_missing_frame_uses_estimate_and_logs_fallback(self):
+        payload = ParseDict(uplink(11), integration.UplinkEvent()).SerializeToString()
+        with patch.object(app, 'get_uplink_frame_size', AsyncMock(return_value=None)), \
+             patch.object(app, 'database', AsyncMock()) as database, \
+             patch.object(app, 'deviceredis', AsyncMock()), patch('builtins.print') as output:
+            await app.handle_message((b'1000-0', {b'up': payload}), Mock())
+        self.assertEqual(database.upsert_data_credits.await_args.args[2], 2)
+        self.assertTrue(any('DC frame size unavailable' in str(c) for c in output.call_args_list))
+
+    async def test_non_helium_uplink_does_not_query_frame_history(self):
+        event = uplink(11)
+        event['rxInfo'] = [{'metadata': {'network': 'private'}}]
+        payload = ParseDict(event, integration.UplinkEvent()).SerializeToString()
+        with patch.object(app, 'get_uplink_frame_size', AsyncMock()) as lookup, \
+             patch.object(app, 'database', AsyncMock()), \
+             patch.object(app, 'deviceredis', AsyncMock()), patch('builtins.print'):
+            await app.handle_message((b'1000-0', {b'up': payload}), Mock())
+        lookup.assert_not_awaited()
+
     async def test_api_device_requests_dispatch_before_acknowledgement(self):
         # Cover JSON logging too: it must not prevent a device update from running.
         for method, handler in (

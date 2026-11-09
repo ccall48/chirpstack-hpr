@@ -20,6 +20,11 @@ def uplink_dc_used(uplink):
         gw.get('metadata', {}).get('network') == 'helium_iot'
         for gw in uplink.get('rxInfo', [])
     )
+    frame_bytes = uplink.get('phyPayloadByteCount')
+    if frame_bytes is not None:
+        if type(frame_bytes) is not int or frame_bytes < 12:
+            raise ValueError('phyPayloadByteCount must be a full LoRaWAN frame length (at least 12 bytes)')
+        return ((frame_bytes + 23) // 24) * hotspots
     return data_bytes_size(uplink.get('data', '')) * hotspots
 
 
