@@ -1,5 +1,6 @@
 import redis.asyncio as redis
 import json
+import os
 """
 intersection between device update and helium cli for updates?
 """
@@ -11,7 +12,7 @@ class DeviceRedis:
         # Set max_connections to match your expected peak concurrency.
         # Default is often unlimited (or very high), which can exhaust OS file descriptors.
         self.r = redis.Redis(
-            host='redis-hpr-v2',
+            host=os.getenv('REDIS_HOST', 'redis'),
             port=6379,
             db=0,
             decode_responses=True,

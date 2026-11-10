@@ -8,6 +8,7 @@ ENV PYTHONASYNCIODEBUG=1
 WORKDIR /app
 
 COPY app/* .
+COPY app/publishers publishers
 COPY app/protos protos
 COPY app/protos/helium protos/helium
 COPY app/protos/helium/iot_config protos/helium/iot_config

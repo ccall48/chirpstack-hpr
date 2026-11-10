@@ -14,6 +14,8 @@ from protos.helium import iot_config
 from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
 from helium_func import data_bytes_size
+from usage_publisher import create_usage_publisher, publish_usage_event
+from event_reader import EventReader
 from api import all_tenant_deveui, get_device_data
 
 
@@ -34,7 +36,9 @@ rdb = redis.Redis(connection_pool=rpool, decode_responses=True)
 
 database = DeviceDatabase()
 deviceredis = DeviceRedis()
-hpr = HeliumConfigCli()
+
+SYNC_INTERVAL_MIN = int(os.getenv('SYNC_INTERVAL_MIN_SECONDS', 300))
+SYNC_INTERVAL_MAX = int(os.getenv('SYNC_INTERVAL_MAX_SECONDS', 600))
 
 
 def sleep_time(start, stop, step):
@@ -56,14 +60,14 @@ async def async_run_every(func: str, interval: int):
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 # RUN PROGRAM
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
-async def get_helium_skfs():
+async def get_helium_skfs(hpr):
     while True:
         print(f'{time.ctime()} START HELIUM SKFS')
         skfs = await hpr.route_skfs_list()
         # update synced helium skfs
         await database.upsert_helium_skfs(skfs)
         # sleeping = sleep_time(3550, 3600, 5)
-        sleeping = sleep_time(300, 600, 5)
+        sleeping = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5)
         print(f'{time.ctime()} END HELIUM SKFS: synced {len(skfs)} skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
@@ -92,12 +96,12 @@ async def devices_sync_upsert():
             ))
         await database.upsert_device(devices)
         # sleeping = sleep_time(3550, 3600, 5)
-        sleeping = sleep_time(300, 600, 5)
+        sleeping = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5)
         print(f'{time.ctime()} END RUNNING SQLITE DB SYNC: synced {len(devices)} devices, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
-async def first_sync_session_keys():
+async def first_sync_session_keys(hpr):
     """Run first on start to ensure sync of all existing device session keys with hpr"""
     print(f'{time.ctime()} START FIRST HELIUM SESSIONKEY SYNC')
     devices = []
@@ -143,41 +147,28 @@ async def first_sync_session_keys():
     print(f'{time.ctime()} END FIRST HELIUM SESSIONKEY SYNC: {len(devices)} skfs updates queued')
 
 
-async def sync_session_keys():
+async def sync_session_keys(hpr):
     while True:
         print(f'{time.ctime()} START RUNNING SKFS PURGE')
         removed = await hpr.remove_stale_skfs()
         # sleeping = sleep_time(43150, 43200, 5)
-        sleeping = sleep_time(300, 600, 5)
+        sleeping = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5)
         print(f'{time.ctime()} END RUNNING SKFS PURGE: removed {removed} stale skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
-async def redis_events_streams():
-    request_stream = 'api:stream:request'
-    device_stream = 'device:stream:event'
-    _id = '0'
-
+async def redis_events_streams(reader, hpr, publisher=None):
     while True:
-        _grpc = None
         try:
-            resp = await rdb.xread(
-                streams={
-                    request_stream: _id,
-                    device_stream: _id,
-                },
-                count=1,
-                block=0
-            )
+            resp = await reader.read()
 
-            for message in resp[0][1]:
-                _id = message[0]
-                _grpc = message[1]
+            for stream_name, message in resp:
 
                 if b'request' in message[1]:
                     msg = message[1][b'request']
                     if b'inform' in msg:
                         # ignore {"service": "inform"}
+                        await reader.acknowledge(stream_name, message[0])
                         continue
 
                     pl = stream.ApiRequestLog()
@@ -185,6 +176,7 @@ async def redis_events_streams():
                     req = MessageToDict(pl)
 
                     if 'method' not in req:
+                        await reader.acknowledge(stream_name, message[0])
                         continue
 
                     match req['service']:
@@ -264,6 +256,15 @@ async def redis_events_streams():
                     pl.ParseFromString(msg)
                     req = MessageToDict(pl, always_print_fields_with_no_presence=True)
 
+                    if publisher is not None:
+                        try:
+                            await publish_usage_event(publisher, req, message[0], route_id)
+                        except Exception as exc:
+                            # Best-effort: a dropped accounting event beats stalling
+                            # the whole event pipeline (device/join sync included)
+                            # behind a billing-provider outage.
+                            print(f'[Usage publish failed, dropping event]: {exc}')
+
                     tenant_id = req['deviceInfo']['tenantId']
                     tenant_name = req['deviceInfo']['tenantName']
                     device_name = req['deviceInfo']['deviceName']
@@ -307,30 +308,47 @@ async def redis_events_streams():
 
                     print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
 
+                await reader.acknowledge(stream_name, message[0])
+
             await asyncio.sleep(0)
 
         except Exception as exc:
             print(f'[Error]:\n {exc}')
-            print(f'[GRPC msg]:\n {_grpc}')
             print('^ * * * * * * * * * * ^ ERROR ^ * * * * * * * * * * ^')
-            pass
+            await asyncio.sleep(5)
 
 
 async def main():
+    publisher = create_usage_publisher()
+    hpr = HeliumConfigCli()
+    reader = EventReader(
+        rdb, ['api:stream:request', 'device:stream:event'],
+        checkpoint_key=(f'hpr:{route_id}:usage:{os.getenv("PUBLISH_USAGE_EVENTS_PROVIDER")}:offsets'
+                        if publisher else None),
+        tail_streams=['device:stream:event'],
+    )
+    # Capture the cutover position before the startup device sync.
+    await reader.initialize()
     # create sqlite db and tables if not exists
     await database.create_tables()
     # handle initial sync of skfs for devices on start
-    await first_sync_session_keys()
+    await first_sync_session_keys(hpr)
     # short sleep before init async tasks.
     await asyncio.sleep(2)
 
     tasks = [
-        redis_events_streams(),
+        redis_events_streams(reader, hpr, publisher),
         devices_sync_upsert(),
-        get_helium_skfs(),
-        sync_session_keys(),
+        get_helium_skfs(hpr),
+        sync_session_keys(hpr),
         # async_run_every(first_sync_session_keys, 600)
     ]
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        if publisher is not None:
+            await publisher.close()
 
-asyncio.run(main())
+
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -2,6 +2,7 @@ aiosqlite
 aiosqlitepool
 base58
 betterproto
+boto3
 chirpstack_api
 googleapis-common-protos
 grpcio
