@@ -1,17 +1,16 @@
 import os
+import asyncio
 import json
 import time
 import logging
+import grpc
 import nacl.bindings
 from helium_py.crypto.keypair import Keypair
 from helium_py.crypto.keypair import SodiumKeyPair
 from protos.helium import iot_config
 from grpclib.client import Channel
-from models import DeviceDatabase
-from api import (
-    get_device_euis,
-    get_device_data,
-)
+from models import device_row
+from api import get_device_data
 from schemas import GetRouteSkfsList, GetDeviceSyncRequest
 
 
@@ -19,17 +18,15 @@ from schemas import GetRouteSkfsList, GetDeviceSyncRequest
 # HELIUM gRPC API CALLS
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 class HeliumConfigCli:
-    def __init__(self):
+    def __init__(self, database):
         self.helium_host = os.getenv('HELIUM_HOST', default='mainnet-config.helium.io')
         self.helium_port = int(os.getenv('HELIUM_PORT', default=6080))
         self.helium_oui = int(os.getenv('HELIUM_OUI', default=None))
         self.route_id = os.getenv('ROUTE_ID', None)
-        self.database = DeviceDatabase()
+        self.database = database
+        # One instance per route/process. Serialize fresh reads through remote writes.
+        self.sync_lock = asyncio.Lock()
         self.delegate_key = r'/app/delegate_key.bin'
-        # Built lazily by _get_channel(), not here: Channel captures the
-        # event loop at construction time, and HeliumConfigCli() is
-        # instantiated at module import time in app.py, before
-        # asyncio.run(main()) starts the real loop.
         self._channel = None
 
         with open(self.delegate_key, 'rb') as f:
@@ -98,7 +95,7 @@ class HeliumConfigCli:
             signer=self.delegate_keypair.address.bin
         )
         req.signature = self.delegate_keypair.sign(req.SerializeToString())
-        resp = await service.update_euis([req])
+        resp = await service.update_euis([req], timeout=15)
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         return
 
@@ -125,7 +122,7 @@ class HeliumConfigCli:
             signer=self.delegate_keypair.address.bin
         )
         req.signature = self.delegate_keypair.sign(req.SerializeToString())
-        resp = await service.update_skfs(req)
+        resp = await service.update_skfs(req, timeout=15)
         print(json.dumps(resp.to_dict(include_default_values=True), indent=2))
         print('^ ============ ^ SESSION KEY -> HPR SYNC ^ ============ ^')
         return
@@ -142,7 +139,7 @@ class HeliumConfigCli:
         )
         req.signature = self.delegate_keypair.sign(req.SerializeToString())
         all_skfs = []
-        async for skfs in service.list_skfs(req):
+        async for skfs in service.list_skfs(req, timeout=30):
             d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
             device = {
                 'routeId': d.routeId,
@@ -166,7 +163,7 @@ class HeliumConfigCli:
         )
         req.signature = self.delegate_keypair.sign(req.SerializeToString())
         all_skfs = []
-        async for skfs in service.list_skfs(req):
+        async for skfs in service.list_skfs(req, timeout=30):
             d = GetRouteSkfsList(**skfs.to_dict(include_default_values=True))
             device = {
                 'routeId': d.routeId,
@@ -181,88 +178,67 @@ class HeliumConfigCli:
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
     # add / remove device euis from HPR
     # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
-    async def add_device_euis(self, meta):
-        action = 0
-        device = meta['dev_eui']
-        dev_eui, join_eui = await get_device_euis(device)
-        return await self.route_euis(int(dev_eui, 16), int(join_eui, 16), action)
+    @staticmethod
+    def skf_update(device):
+        return iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+            devaddr=device.devAddr,
+            session_key=device.nwkSEncKey,
+            action=iot_config.ActionV1(1 if device.isDisabled or device.is_private else 0),
+            max_copies=device.max_copies,
+        )
 
+    async def sync_device(self, dev_eui, update_euis=False):
+        # Lock before the read: locking only the write would still allow stale actions.
+        async with self.sync_lock:
+            try:
+                device, observed_at = await get_device_data(dev_eui, use_cache=False)
+            except grpc.aio.AioRpcError as err:
+                if err.code() != grpc.StatusCode.NOT_FOUND:
+                    raise
+                # Retained create/update/join events can outlive the device itself.
+                print(f'Skipping event for deleted device {dev_eui}')
+                return
+            d = GetDeviceSyncRequest(**device)
+            await self.database.upsert_device([device_row(d, observed_at, self.route_id)])
+            if update_euis:
+                await self.route_euis(d.devEui, d.joinEui, int(d.isDisabled or d.is_private))
+            if d.nwkSEncKey:
+                await self.route_skfs([self.skf_update(d)])
+
+    async def add_device_euis(self, meta):
+        await self.sync_device(meta['dev_eui'], update_euis=True)
 
     async def remove_device_euis(self, meta):
-        action = 1
-        device = meta['dev_eui']
-        dev_eui, join_eui = await self.database.get_device_euis(device)
-        return await self.route_euis(dev_eui, join_eui, action)
-
+        async with self.sync_lock:
+            dev_eui, join_eui = await self.database.get_device_euis(meta['dev_eui'])
+            await self.route_euis(dev_eui, join_eui, 1)
 
     async def update_device(self, meta):
-        """
-        {
-            "service": "api.DeviceService",
-            "method": "Update",
-            "metadata": {
-                "dev_eui": "2cf7f1c053800309",
-                "is_disabled": "false"
-            }
-        }
-        """
-        device = await get_device_data(meta['dev_eui'], use_cache=False)
-        d = GetDeviceSyncRequest(**device)
+        await self.sync_device(meta['dev_eui'], update_euis=True)
 
-        # If device privacy not set, assume false and full roaming
-        is_private = d.is_private
-        max_copies = d.max_copies
-
-        if d.isDisabled or is_private:
-            # remove euis - action = 1
-            action = 1
-            await self.route_euis(d.devEui, d.joinEui, action)
-            # remove skfs
-            skfs_to_remove = [
-                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                    devaddr=d.devAddr,
-                    session_key=d.nwkSEncKey,
-                    action=iot_config.ActionV1(1),
-                )
-            ]
-            await self.route_skfs(skfs_to_remove)
-
-        elif not d.isDisabled:
-            # add euis - action = 0
-            action = 0
-            await self.route_euis(d.devEui, d.joinEui, action)
-            # sync skfs with max_copies update
-            skfs_to_update = [
-                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                    devaddr=d.devAddr,
-                    session_key=d.nwkSEncKey,
-                    action=iot_config.ActionV1(0),
-                    max_copies=max_copies
-                )
-            ]
-            await self.route_skfs(skfs_to_update)
-
-
-    # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
-    # Purge stale skfs
-    # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
-    async def remove_stale_skfs(self) -> int:
-        stale_skfs_list = await self.database.get_stale_skfs()
-        skfs_to_remove = []
-        for skfs in stale_skfs_list:
-            print(f'>>> removing stale skfs: devaddr={skfs["DevAddr"]} session_key={skfs["sessionKey"]}')
-
-            skfs_to_remove.append(
-                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                    devaddr=int(skfs['DevAddr']),
-                    session_key=skfs['sessionKey'],
-                    action=iot_config.ActionV1(1),
-                )
-            )
-
-        if skfs_to_remove:
-            # use chunker to limit update to max 100 per request
-            for group in self.chunker(skfs_to_remove, 100):
-                await self.route_skfs(group)
-
-        return len(skfs_to_remove)
+    async def remove_stale_skfs(self, sync_state):
+        if not sync_state.complete:
+            return 0
+        stale_skfs = await self.database.get_stale_skfs(self.route_id)
+        removed = 0
+        for group in self.chunker(stale_skfs, 100):
+            async with self.sync_lock:
+                # A refresh may have started while we were waiting for this lock.
+                if not sync_state.complete:
+                    break
+                still_stale = set(await self.database.filter_still_stale(
+                    [skf['sessionKey'] for skf in group]
+                ))
+                updates = [
+                    iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                        devaddr=int(skf['devaddr']),
+                        session_key=skf['sessionKey'],
+                        action=iot_config.ActionV1(1),
+                    )
+                    for skf in group if skf['sessionKey'] in still_stale
+                ]
+                if updates:
+                    await self.route_skfs(updates)
+                    await self.database.delete_helium_skfs(self.route_id, list(still_stale))
+                    removed += len(updates)
+        return removed

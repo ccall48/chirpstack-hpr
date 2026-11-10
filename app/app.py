@@ -1,16 +1,14 @@
 import os
 import asyncio
 import time
-import json
 import random
 import redis.asyncio as redis
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from chirpstack_api import integration, stream
 from dotenv import load_dotenv
 
-from models import DeviceDatabase
+from models import DeviceDatabase, device_row
 from redis_models import DeviceRedis
-from protos.helium import iot_config
 from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
 from helium_func import data_bytes_size
@@ -39,22 +37,40 @@ deviceredis = DeviceRedis()
 
 SYNC_INTERVAL_MIN = int(os.getenv('SYNC_INTERVAL_MIN_SECONDS', 300))
 SYNC_INTERVAL_MAX = int(os.getenv('SYNC_INTERVAL_MAX_SECONDS', 600))
+DEVICE_FETCH_CONCURRENCY = 50
+MAX_MESSAGE_ATTEMPTS = 3
+
+
+class SyncState:
+    def __init__(self):
+        self.complete = False
 
 
 def sleep_time(start, stop, step):
     return random.randrange(start, stop, step)
 
 
-async def async_run_every(func: str, interval: int):
-    name = str(func)
-    while True:
+def _chunks(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+async def fetch_devices(device_euis, use_cache=False):
+    # Call under hpr.sync_lock when the results will update device keys.
+    async def fetch(dev_eui):
         try:
-            print(f'{time.ctime()} Executing: {name}, sleeping: {interval} seconds.')
-            await func()
-            await asyncio.sleep(interval)
+            device, observed_at = await get_device_data(dev_eui, use_cache=use_cache)
+            return dev_eui, device, observed_at
         except Exception as err:
-            print(f'{name} Error: {err}')
-            pass
+            # The next reconciliation pass retries; do not sleep holding the sync lock.
+            print(f'[device fetch failed]: {dev_eui}: {err}')
+            return dev_eui, None, None
+
+    results = []
+    for batch in _chunks(device_euis, DEVICE_FETCH_CONCURRENCY):
+        results.extend(await asyncio.gather(*(fetch(dev_eui) for dev_eui in batch)))
+
+    return [(dev_eui, device, observed_at) for dev_eui, device, observed_at in results if device is not None]
 
 
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
@@ -62,252 +78,185 @@ async def async_run_every(func: str, interval: int):
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 async def get_helium_skfs(hpr):
     while True:
-        print(f'{time.ctime()} START HELIUM SKFS')
-        skfs = await hpr.route_skfs_list()
-        # update synced helium skfs
-        await database.upsert_helium_skfs(skfs)
-        # sleeping = sleep_time(3550, 3600, 5)
+        try:
+            print(f'{time.ctime()} START HELIUM SKFS')
+            skfs = await hpr.route_skfs_list()
+            # update synced helium skfs
+            await hpr.database.upsert_helium_skfs(skfs)
+            print(f'{time.ctime()} END HELIUM SKFS: synced {len(skfs)} skfs')
+        except Exception as err:
+            print(f'[get_helium_skfs error]: {err}')
         sleeping = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5)
-        print(f'{time.ctime()} END HELIUM SKFS: synced {len(skfs)} skfs, sleeping {sleeping}s')
         await asyncio.sleep(sleeping)
 
 
-async def devices_sync_upsert():
+async def devices_sync_upsert(hpr, sync_state):
     while True:
-        print(f'{time.ctime()} START RUNNING SQLITE DB SYNC')
-        devices = []
-        device_euis = await all_tenant_deveui()
-        for dev_eui in device_euis:
-            # # use api to collect device data
-            device = await get_device_data(dev_eui)
-            d = GetDeviceSyncRequest(**device)
-            devices.append((
-                str(d.devEui),
-                str(d.name),
-                str(d.isDisabled),
-                json.dumps(d.variables),
-                json.dumps(d.tags),
-                str(d.joinEui),
-                str(d.devAddr),
-                str(d.nwkKey),
-                str(d.appSKey),
-                str(d.nwkSEncKey),
-                route_id,
-            ))
-        await database.upsert_device(devices)
-        # sleeping = sleep_time(3550, 3600, 5)
-        sleeping = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5)
-        print(f'{time.ctime()} END RUNNING SQLITE DB SYNC: synced {len(devices)} devices, sleeping {sleeping}s')
-        await asyncio.sleep(sleeping)
+        sync_state.complete = False
+        complete = True
+        try:
+            device_euis = await all_tenant_deveui()
+            synced = 0
+            for batch in _chunks(device_euis, DEVICE_FETCH_CONCURRENCY):
+                # Hold through fresh reads, SQLite commit and Helium acknowledgement.
+                # Release between batches so queued joins/updates can run first.
+                async with hpr.sync_lock:
+                    fetched = await fetch_devices(batch, use_cache=False)
+                    devices = []
+                    for dev_eui, device, observed_at in fetched:
+                        try:
+                            d = GetDeviceSyncRequest(**device)
+                            devices.append((d, device_row(d, observed_at, route_id)))
+                        except Exception as err:
+                            print(f'[invalid device record]: {dev_eui}: {err}')
+                    if len(devices) != len(batch):
+                        complete = False
+                    await hpr.database.upsert_device([row for _, row in devices])
+                    updates = [hpr.skf_update(d) for d, _ in devices if d.nwkSEncKey]
+                    for group in _chunks(updates, 100):
+                        await hpr.route_skfs(group)
+                    synced += len(devices)
+            # Only a fully discovered, committed and reconciled pass permits purge.
+            sync_state.complete = complete
+            print(f'{time.ctime()} DEVICE/SKF SYNC: {synced}/{len(device_euis)} devices')
+        except Exception as err:
+            print(f'[device/SKF sync error]: {err}')
+        # Retry failed registrations indefinitely, including failures after startup.
+        delay = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5) if sync_state.complete else 5
+        await asyncio.sleep(delay)
 
 
-async def first_sync_session_keys(hpr):
-    """Run first on start to ensure sync of all existing device session keys with hpr"""
-    print(f'{time.ctime()} START FIRST HELIUM SESSIONKEY SYNC')
-    devices = []
-    device_euis = await all_tenant_deveui()
-    for dev_eui in device_euis:
-        # use api to collect device data
-        device = await get_device_data(dev_eui)
-        d = GetDeviceSyncRequest(**device)
+async def sync_session_keys(hpr, sync_state):
+    while True:
+        try:
+            removed = await hpr.remove_stale_skfs(sync_state)
+            print(f'{time.ctime()} SKFS PURGE: removed {removed} stale skfs')
+        except Exception as err:
+            print(f'[sync_session_keys error]: {err}')
+        await asyncio.sleep(sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5))
 
-        is_private = d.is_private
-        max_copies = d.max_copies
 
-        if not d.nwkSEncKey:
-            # skip if device does not have a skfs or joined yet.
-            continue
+async def handle_message(message, hpr, publisher=None):
+    if b'request' in message[1]:
+        msg = message[1][b'request']
+        if b'inform' in msg:
+            # ignore {"service": "inform"}
+            return
 
-        if d.isDisabled or is_private:
-            # remove skfs for a disabled or private device on inital sync.
-            print('Disabled ←', d.devEui, d.name)
-            devices.append(
-                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                    devaddr=d.devAddr,
-                    session_key=d.nwkSEncKey,
-                    action=iot_config.ActionV1(1),
-                    max_copies=max_copies
-                )
-            )
+        pl = stream.ApiRequestLog()
+        pl.ParseFromString(msg)
+        req = MessageToDict(pl)
+
+        if 'method' not in req:
+            return
+
+        match req['service']:
+            case 'api.DeviceService':
+                # Protobuf JSON omits an empty metadata map.
+                if req['method'] in ('Create', 'Delete', 'Update') and not req.get('metadata', {}).get('dev_eui'):
+                    print(f'[Skipping {req["method"]} without dev_eui]: {MessageToJson(pl)}')
+                    return
+
+                if req['method'] == 'Create':
+                    print('========== API Create Euis ==========')
+                    print(MessageToJson(pl))
+                    await hpr.add_device_euis(req['metadata'])
+
+                if req['method'] == 'Delete':
+                    print('========== API Delete Euis ==========')
+                    print(MessageToJson(pl))
+                    await hpr.remove_device_euis(req['metadata'])
+
+                if req['method'] == 'Update':
+                    print('========== API Update Euis ==========')
+                    print(MessageToJson(pl))
+                    await hpr.update_device(req['metadata'])
+
+    if b'join' in message[1]:
+        msg = message[1][b'join']
+        pl = integration.JoinEvent()
+        pl.ParseFromString(msg)
+        dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
+        await hpr.sync_device(dev_eui)
+
+    if b'up' in message[1]:
+        msg = message[1][b'up']
+        pl = integration.UplinkEvent()
+        pl.ParseFromString(msg)
+        req = MessageToDict(pl)
+
+        if publisher is not None:
+            try:
+                await publish_usage_event(publisher, req, message[0], route_id)
+            except Exception as exc:
+                # best-effort: don't stall device/join sync behind a billing outage
+                print(f'[Usage publish failed, dropping event]: {exc}')
+
+        tenant_id = req['deviceInfo']['tenantId']
+        # Protobuf JSON omits empty optional fields.
+        tenant_name = req['deviceInfo'].get('tenantName', '')
+        device_name = req['deviceInfo'].get('deviceName', '')
+        device_eui = req['deviceInfo']['devEui']
+
+        # avoid creating a list, only iterate over data once
+        hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
+
+        if req.get('data'):
+            print('Data:', req['data'])
+
+            dc = data_bytes_size(req['data'])
+            total_dc = dc * hotspots
+
+            print('Tenant:', tenant_name, 'Device:', device_name)
+            print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
+            # decouple sqlite tenant dc count to redis stream?
+            await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
+            #
+            await deviceredis.tenant_dc_stream({
+                'tenant_id': tenant_id,
+                'tenant_name': tenant_name,
+                'device_name': device_name,
+                'device_eui': device_eui,
+                'dc_used': total_dc,
+            })
         else:
-            # Sync enabled and roaming device skfs.
-            print('Enabled →', d.devEui, d.name)
-            devices.append(
-                iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                    devaddr=d.devAddr,
-                    session_key=d.nwkSEncKey,
-                    action=iot_config.ActionV1(0),
-                    max_copies=max_copies
-                )
-            )
+            # blank uplink data cost 1 DC * hotspots seen
+            print('Tenant:', tenant_name, 'Device:', device_name)
+            print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
+            # decouple sqlite tenant dc count to redis stream?
+            await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
+            #
+            await deviceredis.tenant_dc_stream({
+                'tenant_id': tenant_id,
+                'tenant_name': tenant_name,
+                'device_name': device_name,
+                'device_eui': device_eui,
+                'dc_used': hotspots,
+            })
 
-    for group in hpr.chunker(devices, 100):
-        # use chunker to limit update to max 100 per request
-        await hpr.route_skfs(group)
-    print(f'{time.ctime()} END FIRST HELIUM SESSIONKEY SYNC: {len(devices)} skfs updates queued')
-
-
-async def sync_session_keys(hpr):
-    while True:
-        print(f'{time.ctime()} START RUNNING SKFS PURGE')
-        removed = await hpr.remove_stale_skfs()
-        # sleeping = sleep_time(43150, 43200, 5)
-        sleeping = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5)
-        print(f'{time.ctime()} END RUNNING SKFS PURGE: removed {removed} stale skfs, sleeping {sleeping}s')
-        await asyncio.sleep(sleeping)
+        print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
 
 
 async def redis_events_streams(reader, hpr, publisher=None):
+    failures = {}
     while True:
         try:
             resp = await reader.read()
 
             for stream_name, message in resp:
-
-                if b'request' in message[1]:
-                    msg = message[1][b'request']
-                    if b'inform' in msg:
-                        # ignore {"service": "inform"}
-                        await reader.acknowledge(stream_name, message[0])
+                key = (stream_name, message[0])
+                try:
+                    await handle_message(message, hpr, publisher)
+                except Exception as exc:
+                    # The offset stays put, so the next read retries this message.
+                    failures[key] = failures.get(key, 0) + 1
+                    print(f'[Error]: {stream_name} {message[0]} attempt {failures[key]}:\n {exc}')
+                    print('^ * * * * * * * * * * ^ ERROR ^ * * * * * * * * * * ^')
+                    if failures[key] < MAX_MESSAGE_ATTEMPTS:
+                        await asyncio.sleep(5)
                         continue
-
-                    pl = stream.ApiRequestLog()
-                    pl.ParseFromString(msg)
-                    req = MessageToDict(pl)
-
-                    if 'method' not in req:
-                        await reader.acknowledge(stream_name, message[0])
-                        continue
-
-                    match req['service']:
-                        case 'api.DeviceService':
-                            if req['method'] == 'Create':
-                                print('========== API Create Euis ==========')
-                                print(MessageToJson(pl, always_print_fields_with_no_presence=True))
-                                await hpr.add_device_euis(req['metadata'])
-
-                            if req['method'] == 'Delete':
-                                print('========== API Delete Euis ==========')
-                                print(MessageToJson(pl, always_print_fields_with_no_presence=True))
-                                await hpr.remove_device_euis(req['metadata'])
-
-                            if req['method'] == 'Update':
-                                print('========== API Update Euis ==========')
-                                print(MessageToJson(pl, always_print_fields_with_no_presence=True))
-                                await hpr.update_device(req['metadata'])
-
-                if b'join' in message[1]:
-                    msg = message[1][b'join']
-                    pl = integration.JoinEvent()
-                    pl.ParseFromString(msg)
-                    dev_eui = MessageToDict(pl)["deviceInfo"]["devEui"]
-                    activate = await get_device_data(dev_eui, use_cache=False)
-                    d = GetDeviceSyncRequest(**activate)
-                    device = [(
-                        str(d.devEui),
-                        str(d.name),
-                        str(d.isDisabled),
-                        json.dumps(d.variables),
-                        json.dumps(d.tags),
-                        str(d.joinEui),
-                        str(d.devAddr),
-                        str(d.nwkKey),
-                        str(d.appSKey),
-                        str(d.nwkSEncKey),
-                        route_id
-                    )]
-                    await database.upsert_device(device)
-                    print(f'JOIN REQUEST\nName={d.name}\nDevEui={hex(d.devEui)[2:]}\nSessionKey={d.nwkSEncKey}\nDevAddr={hex(d.devAddr)[2:]}')  # noqa: E501
-                    #
-                    # PRIVATE & MAX COPIES UPDATE HERE!
-                    #
-                    is_private = d.is_private
-                    max_copies = d.max_copies
-
-                    if is_private:
-                        # if device is private, do not sync with hpr.
-                        sync_join_skfs = [
-                            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                                devaddr=d.devAddr,
-                                session_key=d.nwkSEncKey,
-                                # 0 add, 1 remove
-                                action=iot_config.ActionV1(1),
-                                # device max_copies if set, else 0 for default
-                                max_copies=max_copies
-                            )
-                        ]
-                    else:
-                        # sync with Helium Pakcet Router
-                        sync_join_skfs = [
-                            iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
-                                devaddr=d.devAddr,
-                                session_key=d.nwkSEncKey,
-                                # 0 add, 1 remove
-                                action=iot_config.ActionV1(0),
-                                # set max_copies or 0 for default route amount
-                                max_copies=max_copies
-                            )
-                        ]
-                    await hpr.route_skfs(sync_join_skfs)
-
-                if b'up' in message[1]:
-                    msg = message[1][b'up']
-                    pl = integration.UplinkEvent()
-                    pl.ParseFromString(msg)
-                    req = MessageToDict(pl, always_print_fields_with_no_presence=True)
-
-                    if publisher is not None:
-                        try:
-                            await publish_usage_event(publisher, req, message[0], route_id)
-                        except Exception as exc:
-                            # Best-effort: a dropped accounting event beats stalling
-                            # the whole event pipeline (device/join sync included)
-                            # behind a billing-provider outage.
-                            print(f'[Usage publish failed, dropping event]: {exc}')
-
-                    tenant_id = req['deviceInfo']['tenantId']
-                    tenant_name = req['deviceInfo']['tenantName']
-                    device_name = req['deviceInfo']['deviceName']
-                    device_eui = req['deviceInfo']['devEui']
-
-                    # avoid creating a list, only iterate over data once
-                    hotspots = sum(1 for gw in req['rxInfo'] if gw.get('metadata', {}).get('network') == 'helium_iot')
-
-                    if req.get('data'):
-                        print('Data:', req['data'])
-
-                        dc = data_bytes_size(req['data'])
-                        total_dc = dc * hotspots
-
-                        print('Tenant:', tenant_name, 'Device:', device_name)
-                        print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
-                        # decouple sqlite tenant dc count to redis stream?
-                        await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
-                        #
-                        await deviceredis.tenant_dc_stream({
-                            'tenant_id': tenant_id,
-                            'tenant_name': tenant_name,
-                            'device_name': device_name,
-                            'device_eui': device_eui,
-                            'dc_used': total_dc,
-                        })
-                    else:
-                        # blank uplink data cost 1 DC * hotspots seen
-                        print('Tenant:', tenant_name, 'Device:', device_name)
-                        print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
-                        # decouple sqlite tenant dc count to redis stream?
-                        await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
-                        #
-                        await deviceredis.tenant_dc_stream({
-                            'tenant_id': tenant_id,
-                            'tenant_name': tenant_name,
-                            'device_name': device_name,
-                            'device_eui': device_eui,
-                            'dc_used': hotspots,
-                        })
-
-                    print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
-
+                    print(f'[Skipping poison message]: {stream_name} {message[0]}')
+                failures.pop(key, None)
                 await reader.acknowledge(stream_name, message[0])
 
             await asyncio.sleep(0)
@@ -320,28 +269,22 @@ async def redis_events_streams(reader, hpr, publisher=None):
 
 async def main():
     publisher = create_usage_publisher()
-    hpr = HeliumConfigCli()
+    hpr = HeliumConfigCli(database)
     reader = EventReader(
         rdb, ['api:stream:request', 'device:stream:event'],
         checkpoint_key=(f'hpr:{route_id}:usage:{os.getenv("PUBLISH_USAGE_EVENTS_PROVIDER")}:offsets'
                         if publisher else None),
         tail_streams=['device:stream:event'],
     )
-    # Capture the cutover position before the startup device sync.
+    sync_state = SyncState()
     await reader.initialize()
-    # create sqlite db and tables if not exists
     await database.create_tables()
-    # handle initial sync of skfs for devices on start
-    await first_sync_session_keys(hpr)
-    # short sleep before init async tasks.
-    await asyncio.sleep(2)
 
     tasks = [
         redis_events_streams(reader, hpr, publisher),
-        devices_sync_upsert(),
+        devices_sync_upsert(hpr, sync_state),
         get_helium_skfs(hpr),
-        sync_session_keys(hpr),
-        # async_run_every(first_sync_session_keys, 600)
+        sync_session_keys(hpr, sync_state),
     ]
     try:
         await asyncio.gather(*tasks)

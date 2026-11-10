@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import asyncio
 import grpc
 import redis.asyncio as redis
@@ -31,12 +32,12 @@ _redis = redis.Redis(
     port=6379,
     db=0,
     decode_responses=True,
+    socket_connect_timeout=5,
+    socket_timeout=5,
 )
-# Short-lived cache to dedupe the guaranteed double-fetch of every device at
-# startup (first_sync_session_keys immediately followed by devices_sync_upsert's
-# first loop). Kept well below the sync interval so periodic syncs still see
-# fresh data; event-driven callers (join/update) bypass it with use_cache=False.
+# Key-changing callers bypass this cache and serialize fresh reads through writes.
 DEVICE_DATA_CACHE_TTL = 30  # seconds
+RPC_TIMEOUT = 10
 
 
 async def _get_channel() -> grpc.aio.Channel:
@@ -59,7 +60,7 @@ async def get_device_euis(dev_eui) -> int | int:
     client = api.DeviceServiceStub(await _get_channel())
     req = api.GetDeviceRequest()
     req.dev_eui = dev_eui
-    resp = await client.Get(req, metadata=AUTH_TOKEN)
+    resp = await client.Get(req, metadata=AUTH_TOKEN, timeout=RPC_TIMEOUT)
     data = MessageToDict(resp)['device']
     return data['devEui'], data['joinEui']
 
@@ -67,102 +68,107 @@ async def get_device_euis(dev_eui) -> int | int:
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
 #  Functions for database device sync
 # ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~
+PAGE_SIZE = 1000
+
+
+async def _list_all(list_fn, build_request, get_id):
+    """Page through a ChirpStack List RPC (limit/offset/total_count) until exhausted."""
+    ids = []
+    offset = 0
+    while True:
+        req = build_request(PAGE_SIZE, offset)
+        resp = await list_fn(req, metadata=AUTH_TOKEN, timeout=RPC_TIMEOUT)
+        ids.extend(get_id(item) for item in resp.result)
+        offset += len(resp.result)
+        if offset >= resp.total_count:
+            return ids
+        if not resp.result:
+            raise RuntimeError('ChirpStack returned an incomplete listing')
+
+
 async def get_tenant_list() -> list[str]:
     client = api.TenantServiceStub(await _get_channel())
-    # # Define the API key meta-data.
-    req = api.ListTenantsRequest()
-    req.limit = 1000  # mandatory if you want details.
-    resp = await client.List(req, metadata=AUTH_TOKEN)
-    tenants = [x['id'] for x in MessageToDict(resp)['result']]
-    return tenants
+
+    def build_request(limit, offset):
+        req = api.ListTenantsRequest()
+        req.limit = limit
+        req.offset = offset
+        return req
+
+    return await _list_all(client.List, build_request, lambda item: item.id)
 
 
 async def get_tennant_apps(tenant_id: str) -> list[str]:
     client = api.ApplicationServiceStub(await _get_channel())
-    # # Define the API key meta-data.
-    req = api.ListApplicationsRequest()
-    req.limit = 1000  # mandatory if you want details.
-    req.tenant_id = tenant_id
-    resp = await client.List(req, metadata=AUTH_TOKEN)
-    data = MessageToDict(resp)
-    if data.get('result'):
-        return [x['id'] for x in data['result']]
-    return
+
+    def build_request(limit, offset):
+        req = api.ListApplicationsRequest()
+        req.limit = limit
+        req.offset = offset
+        req.tenant_id = tenant_id
+        return req
+
+    return await _list_all(client.List, build_request, lambda item: item.id)
 
 
 async def get_application_devices(application_id: str) -> list[str]:
     client = api.DeviceServiceStub(await _get_channel())
-    # # Construct request.
-    req = api.ListDevicesRequest()
-    req.limit = 1000  # mandatory if you want details.
-    req.application_id = application_id
-    resp = await client.List(req, metadata=AUTH_TOKEN)
-    devices = MessageToDict(resp)
-    if devices.get('result'):
-        return [x['devEui'] for x in devices['result']]
-    return
+
+    def build_request(limit, offset):
+        req = api.ListDevicesRequest()
+        req.limit = limit
+        req.offset = offset
+        req.application_id = application_id
+        return req
+
+    return await _list_all(client.List, build_request, lambda item: item.dev_eui)
 
 
-async def get_device_data(dev_eui: str, use_cache: bool = True) -> dict:
-    """ example full output
-    {
-        "devEui": "2cf7f1c053800000",
-        "name": "T1000A-WDRIoT-004",
-        "description": "Disabled",
-        "applicationId": "826ffd30-0286-43e9-b174-d58d3aabc1f0",
-        "deviceProfileId": "abd8d5af-8d58-49ab-a420-a4ff028ba72b",
-        "variables": {
-            "ThingsBoardAccessToken": "PpG1jeVwwx6erVnSnF1c",
-            "max_copies": "10",     // optional...
-            "private": "false"      // optional...
-        },
-        "joinEui": "7c3b5e861683b000",
-        "skipFcntCheck": false,
-        "isDisabled": false,
-        "tags": {
-            "max_copies": "10",     // optional...
-            "private": "false"      // optional...
-        },
-        "devAddr": "780001e6",
-        "appSKey": "f618237213154bb1886b2b5370bf4000",
-        "nwkSEncKey": "badfa2746a9aa9f022534f941d373000",
-        "fCntUp": 467,
-        "nFCntDown": 13,
-        "sNwkSIntKey": "badfa2746a9aa9f022534f941d373000",
-        "fNwkSIntKey": "badfa2746a9aa9f022534f941d373000",
-        "aFCntDown": 0,
-        "nwkKey": "dcf45e151d003f8b707afbb875f72000",
-        "appKey": "00000000000000000000000000000000"
-        }
-    """
+async def get_device_data(dev_eui: str, use_cache: bool = True) -> tuple[dict, float]:
+    # The timestamp travels with cache entries for diagnostics. It is not a
+    # ChirpStack revision; key-changing callers serialize uncached reads themselves.
     cache_key = f'device_data:{dev_eui}'
 
     if use_cache:
         try:
             cached = await _redis.get(cache_key)
             if cached:
-                return json.loads(cached)
+                envelope = json.loads(cached)
+                if isinstance(envelope, dict) and 'data' in envelope and 'observed_at' in envelope:
+                    return envelope['data'], envelope['observed_at']
+                # Ignore the old cache format during rolling upgrades.
         except redis.RedisError as e:
             print('[Redis Error: get_device_data read]', e)
 
     client = api.DeviceServiceStub(await _get_channel())
     req = api.GetDeviceRequest()
     req.dev_eui = dev_eui
-    a = MessageToDict(await client.Get(req, metadata=AUTH_TOKEN), True)['device']
-    b = MessageToDict(await client.GetActivation(req, metadata=AUTH_TOKEN), True)
+    observed_at = time.time()
+    a = MessageToDict(await client.Get(req, metadata=AUTH_TOKEN, timeout=RPC_TIMEOUT), True)['device']
+    try:
+        b = MessageToDict(await client.GetActivation(req, metadata=AUTH_TOKEN, timeout=RPC_TIMEOUT), True)
+    except grpc.aio.AioRpcError as err:
+        if err.code() != grpc.StatusCode.NOT_FOUND:
+            raise
+        b = {}
     if b.get('deviceActivation'):
         b = b['deviceActivation']
-        c = MessageToDict(await client.GetKeys(req, metadata=AUTH_TOKEN), True)['deviceKeys']
+        try:
+            c = MessageToDict(await client.GetKeys(req, metadata=AUTH_TOKEN, timeout=RPC_TIMEOUT), True)['deviceKeys']
+        except grpc.aio.AioRpcError as err:
+            if err.code() != grpc.StatusCode.NOT_FOUND:
+                raise
+            c = {}  # ABP devices can have an activation without root keys.
         data = a | b | c
     else:
         data = a | b
 
     try:
-        await _redis.set(cache_key, json.dumps(data), ex=DEVICE_DATA_CACHE_TTL)
+        await _redis.set(cache_key, json.dumps({'data': data, 'observed_at': observed_at}), ex=DEVICE_DATA_CACHE_TTL)
     except redis.RedisError as e:
         print('[Redis Error: get_device_data write]', e)
 
-    return data
+    return data, observed_at
 
 
 async def all_tenant_apps() -> list[str]:
@@ -170,18 +176,18 @@ async def all_tenant_apps() -> list[str]:
     if not tenants:
         return []
 
-    # Run all tenant fetches concurrently
     results = await asyncio.gather(
         *(get_tennant_apps(tenant) for tenant in tenants),
         return_exceptions=True
     )
 
-    # Flatten and filter valid lists, ignoring tenants with no applications
-    return [
-        app for result in results
-        if isinstance(result, list)
-        for app in result
-    ]
+    apps = []
+    for tenant, result in zip(tenants, results):
+        if isinstance(result, Exception):
+            raise RuntimeError(f'failed to list applications for tenant {tenant}') from result
+        if result:
+            apps.extend(result)
+    return apps
 
 
 async def all_tenant_deveui() -> list[str]:
@@ -189,15 +195,15 @@ async def all_tenant_deveui() -> list[str]:
     if not app_ids:
         return []
 
-    # Run all device fetches concurrently
     results = await asyncio.gather(
         *(get_application_devices(app_id) for app_id in app_ids),
         return_exceptions=True
     )
 
-    # Flatten and filter valid lists, ignoring applications with no devices
-    return [
-        dev_eui for result in results
-        if isinstance(result, list)
-        for dev_eui in result
-    ]
+    devices = []
+    for app_id, result in zip(app_ids, results):
+        if isinstance(result, Exception):
+            raise RuntimeError(f'failed to list devices for application {app_id}') from result
+        if result:
+            devices.extend(result)
+    return devices

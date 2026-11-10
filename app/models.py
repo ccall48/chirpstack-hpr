@@ -1,6 +1,24 @@
 import os
+import json
 import aiosqlite
 from aiosqlitepool import SQLiteConnectionPool
+
+
+def device_row(device, observed_at, route_id):
+    return {
+        'devEui': str(device.devEui),
+        'name': device.name,
+        'isDisabled': device.isDisabled,
+        'variables': json.dumps(device.variables),
+        'tags': json.dumps(device.tags),
+        'joinEui': str(device.joinEui),
+        'devAddr': str(device.devAddr or 0),
+        'nwkKey': device.nwkKey or '',
+        'appSKey': device.appSKey or '',
+        'nwkSEncKey': device.nwkSEncKey or '',
+        'route_id': route_id,
+        'keyFetchedAt': observed_at,
+    }
 
 
 class DeviceDatabase:
@@ -48,8 +66,13 @@ class DeviceDatabase:
                         nwkKey TEXT,
                         appSKey TEXT,
                         nwkSEncKey TEXT,
-                        routeId TEXT
+                        routeId TEXT,
+                        keyFetchedAt REAL NOT NULL DEFAULT 0
                 )""")
+                async with db.execute("PRAGMA table_info(devices)") as cursor:
+                    columns = {row[1] async for row in cursor}
+                if 'keyFetchedAt' not in columns:
+                    await db.execute("ALTER TABLE devices ADD COLUMN keyFetchedAt REAL NOT NULL DEFAULT 0")
                 await db.execute("""
                     CREATE TABLE IF NOT EXISTS data_credits (
                         tenantId TEXT PRIMARY KEY,
@@ -77,19 +100,21 @@ class DeviceDatabase:
                 await db.commit()
         except aiosqlite.Error as e:
             print('[SQL Error: create_tables]\n', e)
-            await db.rollback()
+            raise
 
 
     async def upsert_device(self, kwargs):
         if not self.pool:
             await self.init_pool()
 
+        # All device-key writers hold the shared sync lock from fetch to commit.
+        # Local timestamps are metadata, not a version supplied by ChirpStack.
         sql = """
             INSERT INTO devices
-            (devEui, name, isDisabled, variables, tags, joinEui, devAddr, nwkKey, appSKey, nwkSEncKey, routeId)
+            (devEui, name, isDisabled, variables, tags, joinEui, devAddr, nwkKey, appSKey, nwkSEncKey, routeId, keyFetchedAt)
             VALUES (
                 :devEui, :name, :isDisabled, :variables, :tags,
-                :joinEui, :devAddr, :nwkKey, :appSKey, :nwkSEncKey, :route_id
+                :joinEui, :devAddr, :nwkKey, :appSKey, :nwkSEncKey, :route_id, :keyFetchedAt
             )
             ON CONFLICT(devEui) DO UPDATE
             SET name=:name,
@@ -97,19 +122,24 @@ class DeviceDatabase:
                 variables=:variables,
                 tags=:tags,
                 joinEui=:joinEui,
-                devAddr=:devAddr,
-                nwkKey=:nwkKey,
-                appSKey=:appSKey,
-                nwkSEncKey=:nwkSEncKey,
-                routeId=:route_id
+                routeId=:route_id,
+                devAddr=excluded.devAddr,
+                nwkKey=excluded.nwkKey,
+                appSKey=excluded.appSKey,
+                nwkSEncKey=excluded.nwkSEncKey,
+                keyFetchedAt=excluded.keyFetchedAt
             """
         try:
             async with self.pool.connection() as db:
-                await db.executemany(sql, kwargs)
-                await db.commit()
+                try:
+                    await db.executemany(sql, kwargs)
+                    await db.commit()
+                except BaseException:
+                    await db.rollback()
+                    raise
         except aiosqlite.Error as e:
             print('[SQL ERROR: upsert_device]\n', e)
-            await db.rollback()
+            raise
 
 
     async def upsert_data_credits(self, tenantId, tenantName, dc_used):
@@ -179,32 +209,50 @@ class DeviceDatabase:
     # # # # # # # # # #
     # Purge old device session keys from helium packet router
     # # # # #
-    async def get_stale_skfs(self):
+    async def get_stale_skfs(self, route_id):
+        if not self.pool:
+            await self.init_pool()
+        # Candidate selection must not discard retry state before Helium confirms.
+        sql = """
+            SELECT * FROM helium_skfs
+            WHERE routeId = ? AND sessionKey NOT IN (SELECT nwkSEncKey FROM devices)
+        """
+        async with self.pool.connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, (route_id,)) as cursor:
+                return await cursor.fetchall()
+
+    async def delete_helium_skfs(self, route_id, session_keys):
+        if not self.pool:
+            await self.init_pool()
+        async with self.pool.connection() as db:
+            try:
+                await db.executemany(
+                    "DELETE FROM helium_skfs WHERE routeId = ? AND sessionKey = ?",
+                    [(route_id, key) for key in session_keys],
+                )
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                raise
+
+    async def filter_still_stale(self, session_keys: list[str]) -> list[str]:
+        # Caller holds the shared sync lock through this check and the Helium RPC.
+        if not session_keys:
+            return []
         if not self.pool:
             await self.init_pool()
 
-        sql = """
-            SELECT * FROM helium_skfs
-            WHERE sessionKey NOT IN (SELECT nwkSEncKey FROM devices);
-        """
-        rm_sql = """
-            DELETE FROM helium_skfs
-            WHERE sessionKey NOT IN (SELECT nwkSEncKey FROM devices);
-        """
+        placeholders = ','.join('?' * len(session_keys))
+        sql = f"SELECT nwkSEncKey FROM devices WHERE nwkSEncKey IN ({placeholders})"
         try:
-            skfs_to_remove = []
             async with self.pool.connection() as db:
-                db.row_factory = aiosqlite.Row
-                async with db.execute(sql) as cursor:
-                    async for row in cursor:
-                        skfs_to_remove.append(row)
-                    # delete stale removed skfs
-                    await db.execute(rm_sql)
-                    await db.commit()
-            return skfs_to_remove
+                async with db.execute(sql, session_keys) as cursor:
+                    now_in_use = {row[0] async for row in cursor}
+            return [key for key in session_keys if key not in now_in_use]
         except aiosqlite.Error as e:
-            print('[SQL Error: get_stale_skfs]\n', e)
-            await db.rollback()
+            print('[SQL Error: filter_still_stale]\n', e)
+            return []  # be conservative: remove nothing if we can't verify it's still stale
 
 
 """

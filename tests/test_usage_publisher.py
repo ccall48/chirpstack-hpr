@@ -1,8 +1,9 @@
-import base64
 import copy
 import json
 import os
 import sys
+import subprocess
+import textwrap
 import threading
 import unittest
 from pathlib import Path
@@ -21,23 +22,7 @@ from usage_publisher import (
 from publishers.sqs_usage_publisher import SqsUsagePublisher  # noqa: E402
 
 
-def uplink(size=25):
-    return {
-        "time": "2026-09-28T08:00:00Z",
-        "deduplicationId": "uplink-uuid",
-        "deviceInfo": {
-            "devEui": "0102030405060708",
-            "tenantId": "00000000-0000-0000-0000-000000000001",
-            "applicationId": "00000000-0000-0000-0000-000000000002",
-        },
-        "data": base64.b64encode(bytes(size)).decode(),
-        "rxInfo": [
-            {"metadata": {"network": "helium_iot"}},
-            {"metadata": {"network": "private"}},
-            {"metadata": {"network": "helium_iot"}},
-            {},
-        ],
-    }
+from tests.helpers import uplink
 
 
 class UsageTests(unittest.IsolatedAsyncioTestCase):
@@ -159,9 +144,31 @@ class UsageTests(unittest.IsolatedAsyncioTestCase):
             await publish_usage_event(self.publisher, uplink(), "123-0", "route")
             await publish_usage_event(self.publisher, uplink(), "123-1", "route")
             factory.assert_called_once()
+        self.assertEqual(len(threads), 2)
         self.assertTrue(all(thread != main_thread for thread in threads))
         await self.publisher.close()
         self.client.close.assert_called_once()
+
+    def test_disabled_publishing_does_not_import_aws_modules(self):
+        # Other tests import boto3, so prove lazy loading in a fresh interpreter.
+        result = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent("""
+                import sys
+                import usage_publisher
+                assert usage_publisher.create_usage_publisher() is None
+                forbidden = ("boto3", "botocore", "publishers.sqs_usage_publisher")
+                assert not any(
+                    name == prefix or name.startswith(prefix + ".")
+                    for name in sys.modules for prefix in forbidden
+                )
+            """)],
+            env={
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "app"),
+                "PUBLISH_USAGE_EVENTS": "False",
+            },
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_configuration(self):
         with patch.dict(os.environ, {}, clear=True), patch(
