@@ -4,12 +4,28 @@ from math import ceil
 
 
 def data_bytes_size(b64string: str) -> int:
-    """DC for one uplink copy, estimated from the app payload (base64)."""
-    bytes_per_dc = 24
-    uplink_overhead = 13  # MHDR 1 + DevAddr 4 + FCtrl 1 + FCnt 2 + FPort 1 + MIC 4
-    payload_len = (len(b64string) - b64string.count('=')) * 3 // 4
-    frame_len = uplink_overhead + payload_len
-    return max(ceil(frame_len / bytes_per_dc), 1)
+    """
+    DC per copy: Helium bills ceil(max(frame_bytes, 24) / 24) on the full LoRaWAN frame.
+    frame = MHDR(1) + DevAddr(4) + FCtrl(1) + FCnt(2) + MIC(4) = 12, + FPort(1) + payload when there is data.
+    FOpts isn't in the uplink event, so this is a lower bound.
+    """
+    b64string = b64string or ''
+    payload_bytes = (len(b64string) - b64string.count('=')) * 3 // 4
+    frame_bytes = payload_bytes + 13 if payload_bytes else 12
+    return ceil(max(frame_bytes, 24) / 24)
+
+
+def uplink_dc_used(uplink):
+    hotspots = sum(
+        gw.get('metadata', {}).get('network') == 'helium_iot'
+        for gw in uplink.get('rxInfo', [])
+    )
+    frame_bytes = uplink.get('phyPayloadByteCount')
+    if frame_bytes is not None:
+        if type(frame_bytes) is not int or frame_bytes < 12:
+            raise ValueError('phyPayloadByteCount must be a full LoRaWAN frame length (at least 12 bytes)')
+        return ((frame_bytes + 23) // 24) * hotspots
+    return data_bytes_size(uplink.get('data', '')) * hotspots
 
 
 def get_time():

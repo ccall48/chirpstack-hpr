@@ -47,6 +47,100 @@ class DeviceSyncTests(DatabaseTestCase):
         self.assertTrue(state.complete)
         self.hpr.route_skfs.assert_awaited_once()
 
+    async def seed_cleanup_inventory(self, active_count=9):
+        active = [device(dev_eui=f'{index:016x}', key=f'{index:032x}')
+                  for index in range(1, active_count + 1)]
+        leftover = device()
+        await self.db.upsert_device([
+            device_row(GetDeviceSyncRequest(**data), 1.0, self.hpr.route_id)
+            for data in active + [leftover]
+        ])
+        await self.seed_skfs([leftover['nwkSEncKey']])
+        return {data['devEui']: data for data in active}, leftover
+
+    async def test_complete_pass_removes_leftover_device(self):
+        active, leftover = await self.seed_cleanup_inventory()
+        error = grpc.aio.AioRpcError(grpc.StatusCode.NOT_FOUND, (), (), details='deleted')
+        with patch.object(HeliumProtos, 'get_device_data', AsyncMock(side_effect=error)) as fetch:
+            state = await self.run_passes(active)
+        self.assertTrue(state.complete)
+        fetch.assert_awaited_once_with(leftover['devEui'], use_cache=False)
+        self.hpr.route_euis.assert_awaited_once_with(
+            int(leftover['devEui'], 16), int(leftover['joinEui'], 16), 1
+        )
+        update = self.hpr.route_skfs.await_args.args[0][0]
+        self.assertEqual((update.session_key, update.devaddr, update.action),
+                         (leftover['nwkSEncKey'], int(leftover['devAddr'], 16), 1))
+        self.assertIsNone(await self.db.get_device(leftover['devEui']))
+        self.assertEqual(await self.stored_skfs(), set())
+
+    async def test_incomplete_pass_keeps_leftover_device(self):
+        active, leftover = await self.seed_cleanup_inventory()
+        active[next(iter(active))] = RuntimeError('ChirpStack unavailable')
+        state = await self.run_passes(active)
+        self.assertFalse(state.complete)
+        self.hpr.route_euis.assert_not_awaited()
+        self.assertIsNotNone(await self.db.get_device(leftover['devEui']))
+        self.assertEqual(await self.stored_skfs(), {leftover['nwkSEncKey']})
+
+    async def test_cleanup_removes_every_missing_device_without_size_limit(self):
+        # An application or tenant delete removes many devices at once without Delete events.
+        active, _ = await self.seed_cleanup_inventory(active_count=1)
+        error = grpc.aio.AioRpcError(grpc.StatusCode.NOT_FOUND, (), (), details='deleted')
+        await self.db.upsert_device([
+            device_row(GetDeviceSyncRequest(**device(dev_eui=f'{index:016x}', key=f'{index:032x}')),
+                       1.0, self.hpr.route_id)
+            for index in range(100, 108)
+        ])
+        with patch.object(HeliumProtos, 'get_device_data', AsyncMock(side_effect=error)):
+            state = await self.run_passes(active)
+        self.assertTrue(state.complete)
+        self.assertEqual(self.hpr.route_euis.await_count, 9)
+        self.assertEqual(await self.db.get_device_euis(), {str(int(eui, 16)) for eui in active})
+
+    async def test_empty_listing_does_not_delete_existing_devices(self):
+        await self.seed_cleanup_inventory()
+
+        async def get(dev_eui, use_cache):
+            return device(dev_eui=dev_eui), 2.0
+
+        with patch.object(HeliumProtos, 'get_device_data', get):
+            await self.run_passes({})
+        self.hpr.route_euis.assert_not_awaited()
+        self.assertEqual(len(await self.db.get_device_euis()), 10)
+
+    async def test_cleanup_failure_is_retried_next_complete_pass(self):
+        active, leftover = await self.seed_cleanup_inventory()
+        error = grpc.aio.AioRpcError(grpc.StatusCode.NOT_FOUND, (), (), details='deleted')
+        with patch.object(HeliumProtos, 'get_device_data', AsyncMock(side_effect=error)):
+            self.hpr.route_skfs.side_effect = [None, RuntimeError('Helium unavailable')]
+            self.assertFalse((await self.run_passes(active)).complete)
+            self.assertIsNotNone(await self.db.get_device(leftover['devEui']))
+            self.hpr.route_skfs.side_effect = None
+            self.assertTrue((await self.run_passes(active)).complete)
+        self.assertIsNone(await self.db.get_device(leftover['devEui']))
+
+    async def test_cleanup_preserves_device_created_after_discovery(self):
+        active, leftover = await self.seed_cleanup_inventory()
+
+        async def get(dev_eui, use_cache):
+            self.assertTrue(self.hpr.sync_lock.locked())
+            self.assertFalse(use_cache)
+            return leftover, 2.0
+
+        with patch.object(HeliumProtos, 'get_device_data', get):
+            await self.run_passes(active)
+        self.hpr.route_euis.assert_not_awaited()
+        self.assertIsNotNone(await self.db.get_device(leftover['devEui']))
+
+    async def test_cleanup_does_not_treat_rpc_outage_as_missing_device(self):
+        active, leftover = await self.seed_cleanup_inventory()
+        error = grpc.aio.AioRpcError(grpc.StatusCode.UNAVAILABLE, (), (), details='outage')
+        with patch.object(HeliumProtos, 'get_device_data', AsyncMock(side_effect=error)):
+            self.assertFalse((await self.run_passes(active)).complete)
+        self.hpr.route_euis.assert_not_awaited()
+        self.assertIsNotNone(await self.db.get_device(leftover['devEui']))
+
     async def test_invalid_or_unavailable_device_blocks_purge_but_syncs_good_devices(self):
         good = device()
         for bad in ({"missing": "fields"}, RuntimeError("ChirpStack unavailable")):
@@ -184,6 +278,41 @@ class DeviceSyncTests(DatabaseTestCase):
                 self.assertIsNone(await self.stored_key())
                 self.hpr.route_skfs.assert_not_awaited()
                 self.assertFalse(self.hpr.sync_lock.locked())
+
+
+class DeleteDeviceTests(DatabaseTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.data = device()
+        await self.db.upsert_device([device_row(GetDeviceSyncRequest(**self.data), 1.0, self.hpr.route_id)])
+        await self.seed_skfs([self.data["nwkSEncKey"], "other"])
+
+    async def test_delete_removes_euis_skf_and_device_row(self):
+        await self.hpr.remove_device_euis({"dev_eui": self.data["devEui"]})
+        self.hpr.route_euis.assert_awaited_once_with(
+            int(self.data["devEui"], 16), int(self.data["joinEui"], 16), 1
+        )
+        update = self.hpr.route_skfs.await_args.args[0][0]
+        self.assertEqual((update.session_key, update.devaddr, update.action),
+                         (self.data["nwkSEncKey"], int(self.data["devAddr"], 16), 1))
+        self.assertIsNone(await self.db.get_device(self.data["devEui"]))
+        self.assertEqual(await self.stored_skfs(), {"other"})
+        self.assertFalse(self.hpr.sync_lock.locked())
+
+    async def test_failed_skf_removal_keeps_device_row_for_retry(self):
+        self.hpr.route_skfs.side_effect = RuntimeError("timeout")
+        with self.assertRaisesRegex(RuntimeError, "timeout"):
+            await self.hpr.remove_device_euis({"dev_eui": self.data["devEui"]})
+        self.assertEqual(await self.stored_key(), self.data["nwkSEncKey"])
+        self.assertFalse(self.hpr.sync_lock.locked())
+
+    async def test_delete_without_metadata_or_unknown_device_is_skipped(self):
+        for meta in (None, {}, {"dev_eui": ""}, {"dev_eui": "ffffffffffffffff"}):
+            with self.subTest(meta=meta), patch("builtins.print"):
+                await self.hpr.remove_device_euis(meta)
+        self.hpr.route_euis.assert_not_awaited()
+        self.hpr.route_skfs.assert_not_awaited()
+        self.assertEqual(await self.stored_key(), self.data["nwkSEncKey"])
 
 
 class StaleSkfTests(DatabaseTestCase):

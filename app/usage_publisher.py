@@ -2,15 +2,7 @@ import hashlib
 import os
 from datetime import datetime, timezone
 
-from helium_func import data_bytes_size
-
-
-def uplink_dc_used(uplink):
-    hotspots = sum(
-        gw.get("metadata", {}).get("network") == "helium_iot"
-        for gw in uplink.get("rxInfo", [])
-    )
-    return data_bytes_size(uplink.get("data", "")) * hotspots
+from helium_func import uplink_dc_used
 
 
 def create_usage_publisher():

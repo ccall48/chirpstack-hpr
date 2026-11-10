@@ -1,3 +1,4 @@
+import base64
 import copy
 import json
 import os
@@ -20,6 +21,7 @@ from usage_publisher import (
     uplink_dc_used,
 )  # noqa: E402
 from publishers.sqs_usage_publisher import SqsUsagePublisher  # noqa: E402
+from helium_func import data_bytes_size  # noqa: E402
 
 
 from tests.helpers import uplink
@@ -33,21 +35,29 @@ class UsageTests(unittest.IsolatedAsyncioTestCase):
         self.client = Mock()
         self.publisher._client = self.client
 
-    def test_dc_boundaries_and_non_helium_receptions(self):
+    def test_dc_per_copy_uses_full_lorawan_frame(self):
+        # frame = payload + 13 header/FPort/MIC bytes (12 without data), minimum 24, 24 bytes per DC
         for size, expected in [
-            (0, 2),
-            (1, 2),
-            (23, 2),
-            (24, 2),
-            (25, 4),
-            (48, 4),
-            (49, 6),
+            (0, 1),
+            (1, 1),
+            (11, 1),
+            (12, 2),
+            (35, 2),
+            (36, 3),
+            (51, 3),
+            (222, 10),
         ]:
             with self.subTest(size=size):
-                self.assertEqual(uplink_dc_used(uplink(size)), expected)
+                self.assertEqual(data_bytes_size(base64.b64encode(bytes(size)).decode()), expected)
+
+    def test_dc_multiplies_by_helium_receptions(self):
+        # uplink() is received by two helium hotspots and two non-helium gateways
+        self.assertEqual(uplink_dc_used(uplink(12)), 4)
         event = uplink()
         del event["data"]
         self.assertEqual(uplink_dc_used(event), 2)
+        event["rxInfo"] = [{}, {"metadata": {"network": "private"}}]
+        self.assertEqual(uplink_dc_used(event), 0)
 
     async def test_v1_payload_and_fifo_contract(self):
         await publish_usage_event(self.publisher, uplink(), "123-0", "route")

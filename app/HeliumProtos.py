@@ -208,10 +208,37 @@ class HeliumConfigCli:
     async def add_device_euis(self, meta):
         await self.sync_device(meta['dev_eui'], update_euis=True)
 
-    async def remove_device_euis(self, meta):
+    async def remove_device_euis(self, meta, require_missing=False):
+        dev_eui = (meta or {}).get('dev_eui')
+        if not dev_eui:
+            print('Skipping delete without dev_eui')
+            return
         async with self.sync_lock:
-            dev_eui, join_eui = await self.database.get_device_euis(meta['dev_eui'])
-            await self.route_euis(dev_eui, join_eui, 1)
+            if require_missing:
+                # Discovery may predate a create/recreate event. Recheck under the write lock.
+                try:
+                    await get_device_data(dev_eui, use_cache=False)
+                except grpc.aio.AioRpcError as err:
+                    if err.code() != grpc.StatusCode.NOT_FOUND:
+                        raise
+                else:
+                    print(f'Skipping cleanup for existing device {dev_eui}')
+                    return
+            row = await self.database.get_device(dev_eui)
+            if row is None:
+                print(f'Skipping delete for unknown device {dev_eui}')
+                return
+            await self.route_euis(int(row['devEui']), int(row['joinEui']), 1)
+            # The session key outlives the EUI pair; the stale purge only sees keys without a devices row.
+            if row['nwkSEncKey']:
+                await self.route_skfs([iot_config.RouteSkfUpdateReqV1RouteSkfUpdateV1(
+                    devaddr=int(row['devAddr']),
+                    session_key=row['nwkSEncKey'],
+                    action=iot_config.ActionV1(1),
+                )])
+                await self.database.delete_helium_skfs(self.route_id, [row['nwkSEncKey']])
+            # Last, so a failed Helium call is retried from the same row.
+            await self.database.delete_device(dev_eui)
 
     async def update_device(self, meta):
         await self.sync_device(meta['dev_eui'], update_euis=True)

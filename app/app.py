@@ -11,7 +11,8 @@ from models import DeviceDatabase, device_row
 from redis_models import DeviceRedis
 from HeliumProtos import HeliumConfigCli
 from schemas import GetDeviceSyncRequest
-from helium_func import data_bytes_size
+from helium_func import uplink_dc_used
+from uplink_frames import get_uplink_frame_size
 from usage_publisher import create_usage_publisher, publish_usage_event
 from event_reader import EventReader
 from api import all_tenant_deveui, get_device_data
@@ -118,8 +119,16 @@ async def devices_sync_upsert(hpr, sync_state):
                     synced += len(devices)
             # Only a fully discovered, committed and reconciled pass permits purge.
             sync_state.complete = complete
+            if sync_state.complete:
+                stored_euis = await hpr.database.get_device_euis()
+                discovered_euis = {str(int(eui, 16)) for eui in device_euis}
+                # No size guard: deleting an application or tenant emits no per-device Delete events.
+                # require_missing rechecks each device, so an incomplete listing never removes an existing one.
+                for dev_eui in sorted(stored_euis - discovered_euis):
+                    await hpr.remove_device_euis({'dev_eui': f'{int(dev_eui):016x}'}, require_missing=True)
             print(f'{time.ctime()} DEVICE/SKF SYNC: {synced}/{len(device_euis)} devices')
         except Exception as err:
+            sync_state.complete = False
             print(f'[device/SKF sync error]: {err}')
         # Retry failed registrations indefinitely, including failures after startup.
         delay = sleep_time(SYNC_INTERVAL_MIN, SYNC_INTERVAL_MAX, 5) if sync_state.complete else 5
@@ -185,6 +194,15 @@ async def handle_message(message, hpr, publisher=None):
         pl.ParseFromString(msg)
         req = MessageToDict(pl)
 
+        hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
+        if hotspots:
+            frame_bytes = await get_uplink_frame_size(rdb, req, message[0])
+            if frame_bytes is None:
+                print(f'[DC frame size unavailable, using estimate]: {message[0]}')
+            else:
+                # Enrich the normalized event once so SQLite, Redis and SQS agree.
+                req['phyPayloadByteCount'] = frame_bytes
+
         if publisher is not None:
             try:
                 await publish_usage_event(publisher, req, message[0], route_id)
@@ -198,41 +216,22 @@ async def handle_message(message, hpr, publisher=None):
         device_name = req['deviceInfo'].get('deviceName', '')
         device_eui = req['deviceInfo']['devEui']
 
-        # avoid creating a list, only iterate over data once
-        hotspots = sum(1 for gw in req.get('rxInfo', []) if gw.get('metadata', {}).get('network') == 'helium_iot')
+        total_dc = uplink_dc_used(req)
 
         if req.get('data'):
             print('Data:', req['data'])
-
-            dc = data_bytes_size(req['data'])
-            total_dc = dc * hotspots
-
-            print('Tenant:', tenant_name, 'Device:', device_name)
-            print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
-            # decouple sqlite tenant dc count to redis stream?
-            await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
-            #
-            await deviceredis.tenant_dc_stream({
-                'tenant_id': tenant_id,
-                'tenant_name': tenant_name,
-                'device_name': device_name,
-                'device_eui': device_eui,
-                'dc_used': total_dc,
-            })
-        else:
-            # blank uplink data cost 1 DC * hotspots seen
-            print('Tenant:', tenant_name, 'Device:', device_name)
-            print('Hotspot Count:', hotspots, 'DC Used:', hotspots)
-            # decouple sqlite tenant dc count to redis stream?
-            await database.upsert_data_credits(tenant_id, tenant_name, hotspots)
-            #
-            await deviceredis.tenant_dc_stream({
-                'tenant_id': tenant_id,
-                'tenant_name': tenant_name,
-                'device_name': device_name,
-                'device_eui': device_eui,
-                'dc_used': hotspots,
-            })
+        print('Tenant:', tenant_name, 'Device:', device_name)
+        print('Hotspot Count:', hotspots, 'DC Used:', total_dc)
+        # decouple sqlite tenant dc count to redis stream?
+        await database.upsert_data_credits(tenant_id, tenant_name, total_dc)
+        #
+        await deviceredis.tenant_dc_stream({
+            'tenant_id': tenant_id,
+            'tenant_name': tenant_name,
+            'device_name': device_name,
+            'device_eui': device_eui,
+            'dc_used': total_dc,
+        })
 
         print('^ ============ ^ DEVICE UPLINK EVENT ^ ============ ^')
 
